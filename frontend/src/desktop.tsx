@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode, type MouseEvent as ReactMouseEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ChevronDown,
@@ -26,6 +26,13 @@ import {
   Minus,
   Square,
   Github,
+  Folder,
+  FilePlus2,
+  Pencil,
+  EyeOff,
+  Trash2,
+  Copy,
+  Save,
 } from "lucide-react";
 import { version } from "../package.json";
 import { api, errorMessage, isDesktop, onStateChanged } from "./api";
@@ -1415,6 +1422,7 @@ function Worktree({
 }) {
   const client = useQueryClient();
   const [filter, setFilter] = useState(""),
+    [fileView, setFileView] = useState<"changes" | "all">("changes"),
     [selected, setSelected] = useState<{ path: string; staged: boolean }>(),
     [commitHash, setCommitHash] = useState(""),
     [historyFile, setHistoryFile] = useState(""),
@@ -1422,7 +1430,41 @@ function Worktree({
     [sending, setSending] = useState(false),
     [stageOverrides, setStageOverrides] = useState<Record<string, boolean>>({}),
     [stagingPaths, setStagingPaths] = useState<Set<string>>(new Set()),
-    [stageError, setStageError] = useState("");
+    [stageError, setStageError] = useState(""),
+    [changesCollapsed, setChangesCollapsed] = useState<Set<string>>(new Set()),
+    [menu, setMenu] = useState<{
+      x: number;
+      y: number;
+      node: FileTreeNode;
+    }>(),
+    [editing, setEditing] = useState(""),
+    [editorText, setEditorText] = useState(""),
+    [editorOriginal, setEditorOriginal] = useState(""),
+    [editorLoading, setEditorLoading] = useState(false),
+    [editorSaving, setEditorSaving] = useState(false),
+    [editorError, setEditorError] = useState(""),
+    [cursorLine, setCursorLine] = useState(1),
+    [newFileOpen, setNewFileOpen] = useState(false),
+    [newFileName, setNewFileName] = useState(""),
+    [newFileError, setNewFileError] = useState("");
+  const editorRef = useRef<HTMLTextAreaElement>(null);
+  const gutterRef = useRef<HTMLPreElement>(null);
+  useEffect(() => {
+    if (!menu) return;
+    const close = (event: PointerEvent) => {
+      if (!(event.target as Element).closest(".desktop-context-menu"))
+        setMenu(undefined);
+    };
+    const key = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMenu(undefined);
+    };
+    document.addEventListener("pointerdown", close);
+    document.addEventListener("keydown", key);
+    return () => {
+      document.removeEventListener("pointerdown", close);
+      document.removeEventListener("keydown", key);
+    };
+  }, [menu]);
   const draft = useUI((s) => s.commitDrafts[c.id] || ""),
     submission = useUI((s) => s.commitSubmissions[c.id]);
   const split = draft.indexOf("\n");
@@ -1432,7 +1474,32 @@ function Worktree({
   const writeDraft = (title: string, body: string) =>
     useUI.getState().setCommitDraft(c.id, title + (body ? "\n\n" + body : ""));
   const files = status?.files || [];
+  const allFiles = useQuery({
+    queryKey: ["git", "files", c.id],
+    queryFn: () => api("GitFiles", c.id),
+    enabled: tab === "changes" && fileView === "all",
+  });
   const staged = files.filter(hasStaged);
+  const isChanged = (f: FileStatus) => hasStaged(f) || hasUnstaged(f);
+  const statusByPath = useMemo(
+    () => new Map(files.map((file) => [file.path, file])),
+    [files],
+  );
+  const sourceFiles = useMemo(() => {
+    if (fileView === "changes") return files;
+    return (allFiles.data || []).map((entry) => {
+      const changed = statusByPath.get(entry.path);
+      return (
+        changed || {
+          path: entry.path,
+          originalPath: "",
+          index: " ",
+          worktree: " ",
+          tracked: entry.tracked,
+        }
+      );
+    });
+  }, [allFiles.data, fileView, files, statusByPath]);
   const fullyStaged = (f: FileStatus) => stageOverrides[f.path] ?? (hasStaged(f) && !hasUnstaged(f));
   const stageFiles = async (targets: FileStatus[], next: boolean) => {
     if (!targets.length) return;
@@ -1452,9 +1519,247 @@ function Worktree({
       setStagingPaths((old) => { const nextValues = new Set(old); for (const f of targets) nextValues.delete(f.path); return nextValues; });
     }
   };
-  const filtered = files.filter((f) =>
+  const filtered = sourceFiles.filter((f) =>
     f.path.toLowerCase().includes(filter.toLowerCase()),
   );
+  const tree = useMemo(() => buildFileTree(filtered), [filtered]);
+  const confirmDiscard = () =>
+    !editing ||
+    editorText === editorOriginal ||
+    window.confirm("未保存的修改将丢失，继续？");
+  const selectFile = (f: FileStatus) => {
+    if (!confirmDiscard()) return;
+    setEditing("");
+    setSelected({
+      path: f.path,
+      staged: hasStaged(f) && !hasUnstaged(f),
+    });
+  };
+  const closeEditor = () => {
+    if (!confirmDiscard()) return;
+    setEditing("");
+    setEditorError("");
+  };
+  const openEditor = async (path: string) => {
+    setMenu(undefined);
+    setEditorError("");
+    if (editing === path) return;
+    if (!confirmDiscard()) return;
+    setEditorLoading(true);
+    try {
+      const content = await api("GitFileContent", c.id, path);
+      setEditorText(content);
+      setEditorOriginal(content);
+      setCursorLine(1);
+      setEditing(path);
+      const target = files.find((item) => item.path === path);
+      if (target)
+        setSelected({
+          path,
+          staged: hasStaged(target) && !hasUnstaged(target),
+        });
+    } catch (e) {
+      setEditorText("");
+      setEditorOriginal("");
+      setEditing(path);
+      setEditorError(errorMessage(e));
+    } finally {
+      setEditorLoading(false);
+    }
+  };
+  const saveEditor = async () => {
+    if (!editing) return;
+    setEditorSaving(true);
+    setEditorError("");
+    try {
+      await api("SaveWorkingFile", c.id, editing, editorText);
+      setEditorOriginal(editorText);
+      await client.invalidateQueries({ queryKey: ["git", "status", c.id] });
+      await client.invalidateQueries({ queryKey: ["git", "diff", c.id] });
+    } catch (e) {
+      setEditorError(errorMessage(e));
+    } finally {
+      setEditorSaving(false);
+    }
+  };
+  const createFile = async () => {
+    const name = newFileName.trim().replace(/^\/+/, "");
+    if (!name) return;
+    setNewFileError("");
+    try {
+      await api("CreateWorkingFile", c.id, name);
+      setNewFileOpen(false);
+      setNewFileName("");
+      await client.invalidateQueries({ queryKey: ["git", "status", c.id] });
+      await client.invalidateQueries({ queryKey: ["git", "files", c.id] });
+      await openEditor(name);
+    } catch (e) {
+      setNewFileError(errorMessage(e));
+    }
+  };
+  const openMenu = (event: ReactMouseEvent, node: FileTreeNode) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setMenu({
+      x: Math.min(event.clientX, Math.max(8, window.innerWidth - 220)),
+      y: Math.min(event.clientY, Math.max(8, window.innerHeight - 260)),
+      node,
+    });
+  };
+  const stageNode = (node: FileTreeNode, next: boolean) => {
+    setMenu(undefined);
+    void stageFiles(
+      (node.file ? [node.file] : flattenTree(node)).filter(isChanged),
+      next,
+    );
+  };
+  const nodeStaged = (node: FileTreeNode) => {
+    const targets = (node.file ? [node.file] : flattenTree(node)).filter(
+      isChanged,
+    );
+    return targets.length > 0 && targets.every(fullyStaged);
+  };
+  const ignoreNode = (node: FileTreeNode) => {
+    setMenu(undefined);
+    void execute(async () => {
+      await api("AddToGitignore", c.id, node.path, node.isDir);
+      await client.invalidateQueries({ queryKey: ["git", "status", c.id] });
+      await client.invalidateQueries({ queryKey: ["git", "files", c.id] });
+    });
+  };
+  const untrackNode = (node: FileTreeNode) => {
+    setMenu(undefined);
+    if (
+      !window.confirm(
+        `${node.isDir ? "递归" : ""}从 Git 索引移除 ${node.path}？磁盘文件会保留。`,
+      )
+    )
+      return;
+    void execute(async () => {
+      await api("UntrackFile", c.id, node.path, node.isDir);
+      await client.invalidateQueries({ queryKey: ["git", "status", c.id] });
+      await client.invalidateQueries({ queryKey: ["git", "files", c.id] });
+    });
+  };
+  const updateCursorLine = () => {
+    const position = editorRef.current?.selectionStart ?? 0;
+    setCursorLine(editorText.slice(0, position).split("\n").length);
+  };
+  const renderTree = (nodes: FileTreeNode[], depth: number): ReactNode[] =>
+    nodes.flatMap((node) => {
+      if (node.isDir) {
+        const expanded = !!filter || !changesCollapsed.has(node.path);
+        const stats = treeStats(node);
+        return [
+          <div
+            className="tree-folder"
+            key={`folder:${node.path}`}
+            style={{ paddingLeft: 8 + depth * 14 }}
+            onClick={() =>
+              setChangesCollapsed((old) => {
+                const next = new Set(old);
+                if (next.has(node.path)) next.delete(node.path);
+                else next.add(node.path);
+                return next;
+              })
+            }
+            onContextMenu={(event) => openMenu(event, node)}
+          >
+            {expanded ? (
+              <ChevronDown size={13} />
+            ) : (
+              <ChevronRight size={13} />
+            )}
+            {expanded ? <FolderOpen size={14} /> : <Folder size={14} />}
+            <span className="tree-name" title={node.path}>
+              {node.name}
+            </span>
+            {stats.additions > 0 && (
+              <span className="tree-stat stat-add">+{stats.additions}</span>
+            )}
+            {stats.deletions > 0 && (
+              <span className="tree-stat stat-del">−{stats.deletions}</span>
+            )}
+          </div>,
+          ...(expanded ? renderTree(node.children, depth + 1) : []),
+        ];
+      }
+      const item = node.file!;
+      const stats = fileStats(item);
+      const changed = isChanged(item);
+      return [
+        <div
+          className={`desktop-file-row tree-file ${file?.path === item.path ? "selected" : ""}`}
+          key={`file:${item.path}`}
+          style={{ paddingLeft: 6 + depth * 14 }}
+          onContextMenu={(event) => openMenu(event, node)}
+        >
+          {changed ? (
+            <label
+              className="file-stage-toggle"
+              title={
+                fullyStaged(item)
+                  ? `取消暂存 ${item.path}`
+                  : `暂存 ${item.path}`
+              }
+            >
+              <input
+                aria-label={`${fullyStaged(item) ? "取消暂存" : "暂存"} ${item.path}`}
+                type="checkbox"
+                checked={fullyStaged(item)}
+                disabled={
+                  busy ||
+                  !!statusError ||
+                  !status ||
+                  stagingPaths.has(item.path)
+                }
+                onChange={() => stage(item)}
+              />
+            </label>
+          ) : (
+            <span className="file-stage-spacer" />
+          )}
+          <button
+            title={item.path}
+            className="file-name"
+            onClick={() => {
+              if (fileView === "all" && !changed)
+                void openEditor(item.path);
+              else selectFile(item);
+            }}
+          >
+            <FileText size={13} />
+            <span>
+              {item.originalPath ? `${item.originalPath} → ` : ""}
+              {node.name}
+            </span>
+          </button>
+          <span className="file-line-stats">
+            {stats.additions > 0 && (
+              <span className="stat-add">+{stats.additions}</span>
+            )}
+            {stats.deletions > 0 && (
+              <span className="stat-del">−{stats.deletions}</span>
+            )}
+          </span>
+          {changed && (
+            <code
+              className={
+                item.index === "?" || item.index === "A"
+                  ? "added"
+                  : item.index === "D" || item.worktree === "D"
+                    ? "removed"
+                    : ""
+              }
+            >
+              {item.index === "?"
+                ? "+"
+                : item.worktree.trim() || item.index.trim()}
+            </code>
+          )}
+        </div>,
+      ];
+    });
   const file = files.find((f) => f.path === selected?.path);
   const selectedSide = file
     ? selected?.staged
@@ -1517,6 +1822,11 @@ function Worktree({
         : "";
   const authorAccount = st.accounts.find((a) => a.id === authorAccountID);
   const stage = (f: FileStatus) => void stageFiles([f], !fullyStaged(f));
+  const editingFile = files.find((f) => f.path === editing);
+  const editStats = editingFile ? fileStats(editingFile) : { additions: 0, deletions: 0 };
+  const editorLineCount = editorText ? editorText.split("\n").length : 1;
+  const editable = (f?: FileStatus) =>
+    !!f && f.worktree !== "D" && f.index !== "D";
   return (
     <div
       className={`desktop-workspace ${activeFile || commit ? "has-file" : ""} ${tab === "changes" && status && files.length === 0 ? "clean-state" : ""}`}
@@ -1542,79 +1852,110 @@ function Worktree({
         </div>
         {tab === "changes" ? (
           <>
+            <div className="file-view-toggle" role="tablist" aria-label="文件视图">
+              <button
+                className={fileView === "changes" ? "active" : ""}
+                onClick={() => setFileView("changes")}
+              >
+                变更
+              </button>
+              <button
+                className={fileView === "all" ? "active" : ""}
+                onClick={() => setFileView("all")}
+              >
+                全部
+              </button>
+            </div>
             <label className="file-filter">
               <Search size={14} />
               <input
-                aria-label="筛选变更文件"
+                aria-label="筛选文件"
                 placeholder="筛选文件…"
                 value={filter}
                 onChange={(e) => setFilter(e.target.value)}
               />
             </label>
             <div className="file-count">
-              <input
-                type="checkbox"
-                aria-label="将全部变更加入提交"
-                disabled={busy || !!statusError || !status || stagingPaths.size > 0 || !files.length}
-                checked={
-                  !!files.length &&
-                  files.every(fullyStaged)
-                }
-                onChange={(e) => {
-                  void stageFiles(files, e.target.checked);
-                }}
-              />
+              {fileView === "changes" && (
+                <input
+                  type="checkbox"
+                  aria-label="将全部变更加入提交"
+                  disabled={busy || !!statusError || !status || stagingPaths.size > 0 || !files.length}
+                  checked={
+                    !!files.length &&
+                    files.every(fullyStaged)
+                  }
+                  onChange={(e) => {
+                    void stageFiles(files, e.target.checked);
+                  }}
+                />
+              )}
               <span>
-                {status ? `${files.length} 个变更文件` : "正在读取变更…"}
+                {fileView === "all"
+                  ? allFiles.isPending
+                    ? "正在读取文件…"
+                    : `${allFiles.data?.length ?? 0} 个文件`
+                  : status
+                    ? `${files.length} 个变更文件`
+                    : "正在读取变更…"}
               </span>
+              <button
+                type="button"
+                className="new-file-button"
+                title="新建文件"
+                onClick={() => {
+                  setNewFileName("");
+                  setNewFileError("");
+                  setNewFileOpen(true);
+                }}
+              >
+                <FilePlus2 size={13} />
+                新建
+              </button>
             </div>
             {stageError && <div className="desktop-stage-error" role="alert">{stageError}</div>}
-            <div className="desktop-file-list">
-              {filtered.map((f) => (
-                <div
-                  className={`desktop-file-row ${file?.path === f.path ? "selected" : ""}`}
-                  key={f.path}
-                >
-                  <label className="file-stage-toggle" title={fullyStaged(f) ? `取消暂存 ${f.path}` : `暂存 ${f.path}`}><input
-                    aria-label={`${fullyStaged(f) ? "取消暂存" : "暂存"} ${f.path}`}
-                    type="checkbox"
-                    checked={fullyStaged(f)}
-                    disabled={busy || !!statusError || !status || stagingPaths.has(f.path)}
-                    onChange={() => stage(f)}
-                  /></label>
-                  <button
-                    title={f.path}
-                    className="file-name"
-                    onClick={() =>
-                      setSelected({
-                        path: f.path,
-                        staged: hasStaged(f) && !hasUnstaged(f),
-                      })
-                    }
-                  >
-                    <FileText size={14} />
-                    <span>
-                      {f.originalPath ? `${f.originalPath} → ` : ""}
-                      {f.path}
-                    </span>
-                    <code
-                      className={
-                        f.index === "?" || f.index === "A"
-                          ? "added"
-                          : f.index === "D" || f.worktree === "D"
-                            ? "removed"
-                            : ""
-                      }
-                    >
-                      {f.index === "?"
-                        ? "+"
-                        : f.worktree.trim() || f.index.trim()}
-                    </code>
-                  </button>
-                </div>
-              ))}
-              {!filtered.length && !!files.length && (
-                <p className="desktop-list-empty">没有匹配的文件</p>
+            <div
+              className="desktop-file-list"
+              onContextMenu={(event) => {
+                if (
+                  (event.target as Element).closest(
+                    ".desktop-file-row, .tree-folder",
+                  )
+                )
+                  return;
+                event.preventDefault();
+                setMenu({
+                  x: Math.min(
+                    event.clientX,
+                    Math.max(8, window.innerWidth - 220),
+                  ),
+                  y: Math.min(
+                    event.clientY,
+                    Math.max(8, window.innerHeight - 180),
+                  ),
+                  node: {
+                    name: "",
+                    path: "",
+                    isDir: true,
+                    children: [],
+                  },
+                });
+              }}
+            >
+              {fileView === "all" && allFiles.isPending ? (
+                <Loading />
+              ) : fileView === "all" && allFiles.isError ? (
+                <ErrorNotice message={errorMessage(allFiles.error)} />
+              ) : (
+                <>
+                  {renderTree(tree, 0)}
+                  {!filtered.length && !!sourceFiles.length && (
+                    <p className="desktop-list-empty">没有匹配的文件</p>
+                  )}
+                  {!sourceFiles.length && fileView === "all" && (
+                    <p className="desktop-list-empty">仓库中还没有文件</p>
+                  )}
+                </>
               )}
             </div>
             <form
@@ -1784,6 +2125,88 @@ function Worktree({
               <p>在左侧选择一个提交，查看完整差异。</p>
             </div>
           )
+        ) : editing ? (
+          <div className="desktop-editor">
+            <div className="desktop-diff-header">
+              <button
+                className="desktop-back"
+                aria-label="返回差异"
+                onClick={closeEditor}
+              >
+                <ArrowLeft size={16} />
+              </button>
+              <FileText size={16} />
+              <strong>{editing}</strong>
+              <span>
+                {editorLineCount} 行 · 第 {cursorLine} 行
+              </span>
+              <span className="file-line-stats">
+                {editStats.additions > 0 && (
+                  <span className="stat-add">+{editStats.additions}</span>
+                )}
+                {editStats.deletions > 0 && (
+                  <span className="stat-del">−{editStats.deletions}</span>
+                )}
+              </span>
+              <span className="editor-actions">
+                <button
+                  onClick={saveEditor}
+                  disabled={
+                    editorSaving ||
+                    editorLoading ||
+                    editorText === editorOriginal
+                  }
+                >
+                  <Save size={14} />
+                  {editorSaving ? "保存中…" : "保存"}
+                </button>
+                <button onClick={closeEditor}>关闭</button>
+              </span>
+            </div>
+            {editorError && (
+              <div className="desktop-block-error">
+                <ErrorNotice message={editorError} />
+              </div>
+            )}
+            {editorLoading ? (
+              <Loading />
+            ) : (
+              <div className="editor-body">
+                <pre ref={gutterRef} className="editor-gutter" aria-hidden="true">
+                  {Array.from(
+                    { length: editorLineCount },
+                    (_, index) => index + 1,
+                  ).join("\n")}
+                </pre>
+                <textarea
+                  ref={editorRef}
+                  aria-label={`编辑 ${editing}`}
+                  value={editorText}
+                  spellCheck={false}
+                  onChange={(e) => {
+                    setEditorText(e.target.value);
+                    updateCursorLine();
+                  }}
+                  onScroll={(e) => {
+                    if (gutterRef.current)
+                      gutterRef.current.scrollTop = e.currentTarget.scrollTop;
+                  }}
+                  onClick={updateCursorLine}
+                  onKeyUp={updateCursorLine}
+                  onSelect={updateCursorLine}
+                  onKeyDown={(e) => {
+                    if (
+                      (e.ctrlKey || e.metaKey) &&
+                      e.key.toLowerCase() === "s"
+                    ) {
+                      e.preventDefault();
+                      void saveEditor();
+                    }
+                  }}
+                />
+              </div>
+            )}
+          </div>
         ) : activeFile ? (
           <>
             <div className="desktop-diff-header">
@@ -1797,6 +2220,29 @@ function Worktree({
               <FileText size={16} />
               <strong>{activeFile.path}</strong>
               <span>{activeFile.staged ? "已暂存" : "工作区"}</span>
+              {file && (
+                <span className="file-line-stats">
+                  {fileStats(file).additions > 0 && (
+                    <span className="stat-add">
+                      +{fileStats(file).additions}
+                    </span>
+                  )}
+                  {fileStats(file).deletions > 0 && (
+                    <span className="stat-del">
+                      −{fileStats(file).deletions}
+                    </span>
+                  )}
+                </span>
+              )}
+              <button
+                className="diff-edit-button"
+                disabled={!editable(file)}
+                title={editable(file) ? "在应用内编辑文件" : "该文件不可编辑"}
+                onClick={() => void openEditor(activeFile.path)}
+              >
+                <Pencil size={14} />
+                编辑
+              </button>
             </div>
             {diff.isPending ? (
               <Loading />
@@ -1873,9 +2319,226 @@ function Worktree({
           </div>
         )}
       </main>
+      {menu && (
+        <div
+          className="desktop-context-menu"
+          role="menu"
+          style={{ left: menu.x, top: menu.y }}
+        >
+          {menu.node.path === "" ? (
+            <button
+              onClick={() => {
+                setMenu(undefined);
+                setNewFileName("");
+                setNewFileError("");
+                setNewFileOpen(true);
+              }}
+            >
+              <FilePlus2 size={14} />
+              新建文件…
+            </button>
+          ) : menu.node.isDir ? (
+            <>
+              {flattenTree(menu.node).some(isChanged) && (
+                <button
+                  onClick={() =>
+                    stageNode(menu.node, !nodeStaged(menu.node))
+                  }
+                >
+                  {nodeStaged(menu.node) ? "取消暂存目录" : "暂存目录"}
+                </button>
+              )}
+              <button
+                onClick={() => {
+                  setMenu(undefined);
+                  setNewFileName(`${menu.node.path}/`);
+                  setNewFileError("");
+                  setNewFileOpen(true);
+                }}
+              >
+                <FilePlus2 size={14} />
+                新建文件…
+              </button>
+              <button onClick={() => ignoreNode(menu.node)}>
+                <EyeOff size={14} />
+                添加到 .gitignore
+              </button>
+              {flattenTree(menu.node).some(
+                (file) => file.tracked ?? file.index !== "?",
+              ) && (
+                <button onClick={() => untrackNode(menu.node)}>
+                  <Trash2 size={14} />
+                  移除 Git 跟踪
+                </button>
+              )}
+            </>
+          ) : (
+            <>
+              {isChanged(menu.node.file!) && (
+                <button
+                  onClick={() =>
+                    stageNode(menu.node, !nodeStaged(menu.node))
+                  }
+                >
+                  {nodeStaged(menu.node) ? "取消暂存" : "暂存"}
+                </button>
+              )}
+              <button
+                disabled={!editable(menu.node.file)}
+                onClick={() => void openEditor(menu.node.path)}
+              >
+                <Pencil size={14} />
+                编辑文件
+              </button>
+              <button onClick={() => ignoreNode(menu.node)}>
+                <EyeOff size={14} />
+                添加到 .gitignore
+              </button>
+              {(menu.node.file!.tracked ??
+                menu.node.file!.index !== "?") && (
+                <button onClick={() => untrackNode(menu.node)}>
+                  <Trash2 size={14} />
+                  移除 Git 跟踪
+                </button>
+              )}
+              <button
+                onClick={() => {
+                  void navigator.clipboard.writeText(menu.node.path);
+                  setMenu(undefined);
+                }}
+              >
+                <Copy size={14} />
+                复制路径
+              </button>
+            </>
+          )}
+        </div>
+      )}
+      {newFileOpen && (
+        <Modal title="新建文件" onClose={() => setNewFileOpen(false)}>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              void createFile();
+            }}
+          >
+            <Field label="文件路径" hint="相对仓库根目录，例如 src/new.ts">
+              <input
+                autoFocus
+                value={newFileName}
+                onChange={(e) => setNewFileName(e.target.value)}
+                placeholder="src/new.ts"
+              />
+            </Field>
+            {newFileError && (
+              <div className="desktop-stage-error" role="alert">
+                {newFileError}
+              </div>
+            )}
+            <div className="form-actions">
+              <button type="button" onClick={() => setNewFileOpen(false)}>
+                取消
+              </button>
+              <button className="primary" disabled={!newFileName.trim()}>
+                创建
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
     </div>
   );
 }
+type FileTreeNode = {
+  name: string;
+  path: string;
+  isDir: boolean;
+  file?: FileStatus;
+  children: FileTreeNode[];
+};
+
+function buildFileTree(files: FileStatus[]): FileTreeNode[] {
+  type MutableNode = {
+    name: string;
+    path: string;
+    isDir: boolean;
+    file?: FileStatus;
+    children: Map<string, MutableNode>;
+  };
+  const root = new Map<string, MutableNode>();
+  for (const file of files) {
+    const parts = file.path.split("/");
+    let children = root;
+    let prefix = "";
+    parts.forEach((part, index) => {
+      prefix = prefix ? `${prefix}/${part}` : part;
+      const leaf = index === parts.length - 1;
+      let node = children.get(part);
+      if (!node) {
+        node = {
+          name: part,
+          path: prefix,
+          isDir: !leaf,
+          file: leaf ? file : undefined,
+          children: new Map(),
+        };
+        children.set(part, node);
+      }
+      if (leaf) {
+        node.isDir = false;
+        node.file = file;
+      } else {
+        node.isDir = true;
+        children = node.children;
+      }
+    });
+  }
+  const finish = (children: Map<string, MutableNode>): FileTreeNode[] =>
+    [...children.values()]
+      .sort((a, b) =>
+        a.isDir === b.isDir
+          ? a.name.localeCompare(b.name)
+          : a.isDir
+            ? -1
+            : 1,
+      )
+      .map((node) => ({
+        name: node.name,
+        path: node.path,
+        isDir: node.isDir,
+        file: node.file,
+        children: finish(node.children),
+      }));
+  return finish(root);
+}
+
+function fileStats(file: FileStatus) {
+  return {
+    additions:
+      (file.indexAdditions || 0) + (file.worktreeAdditions || 0),
+    deletions:
+      (file.indexDeletions || 0) + (file.worktreeDeletions || 0),
+  };
+}
+
+function flattenTree(node: FileTreeNode): FileStatus[] {
+  if (node.file) return [node.file];
+  return node.children.flatMap(flattenTree);
+}
+
+function treeStats(node: FileTreeNode) {
+  return flattenTree(node).reduce(
+    (total, file) => {
+      const stats = fileStats(file);
+      return {
+        additions: total.additions + stats.additions,
+        deletions: total.deletions + stats.deletions,
+      };
+    },
+    { additions: 0, deletions: 0 },
+  );
+}
+
 function hasStaged(f: FileStatus) {
   return f.index !== " " && f.index !== "?";
 }

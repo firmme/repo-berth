@@ -1969,3 +1969,204 @@
 :root[data-theme="dark"] .desktop-shell .desktop-history-tree button.history-file-renamed {
   color: #c7a6ff;
 }
+
+/* Changes tree, context menu and in-app editor. */
+.new-file-button {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  min-height: 22px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--secondary-text);
+  font-size: 11px;
+}
+.new-file-button:hover {
+  background: var(--row-hover);
+  color: var(--text);
+}
+.tree-folder {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 30px;
+  padding-right: 8px;
+  cursor: pointer;
+  color: var(--secondary-text);
+  border-bottom: 1px solid var(--soft-border);
+  user-select: none;
+}
+.tree-folder:hover {
+  background: var(--row-hover);
+}
+.tree-folder .tree-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 600;
+}
+.tree-stat,
+.file-line-stats {
+  flex: none;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.file-line-stats {
+  display: inline-flex;
+  gap: 4px;
+  margin-left: 2px;
+}
+.file-line-stats .stat-add,
+.tree-stat.stat-add {
+  color: #1a7f37;
+}
+.file-line-stats .stat-del,
+.tree-stat.stat-del {
+  color: #cf222e;
+}
+:root[data-theme="dark"] .file-line-stats .stat-add,
+:root[data-theme="dark"] .tree-stat.stat-add {
+  color: #74dba4;
+}
+:root[data-theme="dark"] .file-line-stats .stat-del,
+:root[data-theme="dark"] .tree-stat.stat-del {
+  color: #ff9099;
+}
+.desktop-file-row.tree-file {
+  height: 32px;
+}
+.desktop-context-menu {
+  position: fixed;
+  z-index: 140;
+  min-width: 196px;
+  padding: 5px 0;
+  background: var(--surface);
+  border: 1px solid var(--field-border);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px #00000033;
+}
+.desktop-context-menu > button {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  height: auto;
+  min-height: 30px;
+  padding: 5px 12px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+}
+.desktop-context-menu > button:hover:not(:disabled) {
+  background: var(--row-hover);
+}
+.desktop-context-menu > button:disabled {
+  color: var(--faint);
+  background: transparent;
+}
+.desktop-editor {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+.editor-actions {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+.editor-actions button,
+.diff-edit-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 27px;
+  padding: 2px 9px;
+  font-size: 12px;
+}
+.editor-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  background: var(--canvas);
+}
+.editor-gutter {
+  flex: none;
+  min-width: 52px;
+  margin: 0;
+  padding: 10px 8px;
+  overflow: hidden;
+  text-align: right;
+  white-space: pre;
+  color: var(--secondary-text);
+  background: var(--pane);
+  border-right: 1px solid var(--soft-border);
+  font-family: Consolas, "SFMono-Regular", monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  user-select: none;
+}
+.editor-body textarea {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  border-radius: 0;
+  resize: none;
+  padding: 10px 12px;
+  background: var(--canvas);
+  color: var(--text);
+  font-family: Consolas, "SFMono-Regular", monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  outline: none;
+  box-shadow: none !important;
+  tab-size: 4;
+}
+.file-view-toggle {
+  display: flex;
+  gap: 2px;
+  margin: 7px 10px 0;
+  padding: 2px;
+  border: 1px solid var(--soft-border);
+  border-radius: 6px;
+  background: var(--pane);
+  flex: none;
+}
+.file-view-toggle button {
+  flex: 1;
+  height: 22px;
+  min-height: 22px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--secondary-text);
+  font-size: 11px;
+  font-weight: 500;
+}
+.file-view-toggle button:hover:not(.active) {
+  background: var(--row-hover);
+  color: var(--text);
+}
+.file-view-toggle button.active {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+:root[data-theme="dark"] .file-view-toggle button.active {
+  color: #0c1926;
+}
+.file-stage-spacer {
+  width: 31px;
+  flex: none;
+}

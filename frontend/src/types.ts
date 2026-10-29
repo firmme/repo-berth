@@ -121,12 +121,20 @@ export interface FileStatus {
   originalPath: string;
   index: string;
   worktree: string;
+  tracked?: boolean;
+  indexAdditions?: number;
+  indexDeletions?: number;
+  worktreeAdditions?: number;
+  worktreeDeletions?: number;
 }
 export interface RemoteTracking {
   remote: string;
   branch: string;
   ahead: number;
   behind: number;
+}export interface FileEntry {
+  path: string;
+  tracked: boolean;
 }
 export interface GitStatus {
   branch: string;

@@ -29,10 +29,14 @@ type Auth struct {
 	Helper string
 }
 type FileStatus struct {
-	Path         string `json:"path"`
-	OriginalPath string `json:"originalPath"`
-	Index        string `json:"index"`
-	Worktree     string `json:"worktree"`
+	Path              string `json:"path"`
+	OriginalPath      string `json:"originalPath"`
+	Index             string `json:"index"`
+	Worktree          string `json:"worktree"`
+	IndexAdditions    int    `json:"indexAdditions"`
+	IndexDeletions    int    `json:"indexDeletions"`
+	WorktreeAdditions int    `json:"worktreeAdditions"`
+	WorktreeDeletions int    `json:"worktreeDeletions"`
 }
 type Status struct {
 	Branch   string           `json:"branch"`
@@ -54,6 +58,10 @@ type Remote struct {
 	Name    string `json:"name"`
 	URL     string `json:"url"`
 	PushURL string `json:"pushUrl"`
+}
+type FileEntry struct {
+	Path    string `json:"path"`
+	Tracked bool   `json:"tracked"`
 }
 type Commit struct {
 	Hash       string `json:"hash"`
@@ -271,7 +279,7 @@ func (r Runner) Root(ctx context.Context, path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.EvalSymlinks(strings.TrimSpace(out))
+	return Canonical(strings.TrimSpace(out))
 }
 func (r Runner) Remotes(ctx context.Context, path string) ([]Remote, error) {
 	out, err := r.Run(ctx, path, nil, nil, "remote")
@@ -296,6 +304,41 @@ func (r Runner) Remotes(ctx context.Context, path string) ([]Remote, error) {
 	}
 	return result, nil
 }
+
+// Files lists tracked files and untracked files that are not ignored. It never
+// walks ignored dependency or build directories.
+func (r Runner) Files(ctx context.Context, path string) ([]FileEntry, error) {
+	tracked, err := r.Run(ctx, path, nil, nil, "ls-files", "-z")
+	if err != nil {
+		return nil, err
+	}
+	others, err := r.Run(ctx, path, nil, nil, "ls-files", "-z", "--others", "--exclude-standard")
+	if err != nil {
+		return nil, err
+	}
+	entries := []FileEntry{}
+	seen := map[string]bool{}
+	add := func(raw string, isTracked bool) error {
+		for _, file := range strings.Split(raw, "\x00") {
+			if file == "" || seen[file] {
+				continue
+			}
+			if len(entries) >= 50000 {
+				return model.Err("FILE_LIMIT", "仓库文件过多，请使用筛选或外部工具查看")
+			}
+			seen[file] = true
+			entries = append(entries, FileEntry{Path: file, Tracked: isTracked})
+		}
+		return nil
+	}
+	if err := add(tracked, true); err != nil {
+		return nil, err
+	}
+	if err := add(others, false); err != nil {
+		return nil, err
+	}
+	return entries, nil
+}
 func embeddedCredentials(raw string) bool {
 	u, err := url.Parse(raw)
 	if err != nil || u.User == nil {
@@ -311,6 +354,12 @@ func (r Runner) Status(ctx context.Context, path string) (Status, error) {
 		return s, err
 	}
 	s.Files = ParseStatus(out)
+	if raw, err := r.Run(ctx, path, nil, nil, "diff", "--numstat", "-z"); err == nil {
+		applyNumstat(s.Files, raw, false)
+	}
+	if raw, err := r.Run(ctx, path, nil, nil, "diff", "--cached", "--numstat", "-z"); err == nil {
+		applyNumstat(s.Files, raw, true)
+	}
 	branch, err := r.Run(ctx, path, nil, nil, "symbolic-ref", "--short", "-q", "HEAD")
 	if err != nil {
 		s.Branch = "HEAD"
@@ -364,6 +413,44 @@ func ParseStatus(out string) []FileStatus {
 		result = append(result, f)
 	}
 	return result
+}
+
+func applyNumstat(files []FileStatus, raw string, staged bool) {
+	parts := strings.Split(raw, "\x00")
+	for i := 0; i < len(parts); i++ {
+		row := parts[i]
+		if row == "" {
+			continue
+		}
+		cols := strings.SplitN(row, "\t", 3)
+		if len(cols) != 3 {
+			continue
+		}
+		additions, aerr := strconv.Atoi(cols[0])
+		deletions, derr := strconv.Atoi(cols[1])
+		if aerr != nil || derr != nil {
+			continue
+		}
+		path := cols[2]
+		if path == "" && i+2 < len(parts) {
+			// -z renames are emitted as "add\tdel\t\0old\0new\0".
+			i += 2
+			path = parts[i]
+		}
+		for j := range files {
+			if files[j].Path != path && files[j].OriginalPath != path {
+				continue
+			}
+			if staged {
+				files[j].IndexAdditions = additions
+				files[j].IndexDeletions = deletions
+			} else {
+				files[j].WorktreeAdditions = additions
+				files[j].WorktreeDeletions = deletions
+			}
+			break
+		}
+	}
 }
 func (r Runner) Diff(ctx context.Context, path, file string, staged bool) (string, error) {
 	args := []string{"diff", "--no-ext-diff", "--no-textconv", "--no-color", "--patch"}

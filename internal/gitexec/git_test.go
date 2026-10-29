@@ -434,3 +434,33 @@ func TestStatusReportsTrackingForConfiguredRemote(t *testing.T) {
 		t.Fatalf("unexpected diverged tracking: %+v", status.Tracking)
 	}
 }
+
+func TestStatusReportsPerFileLineChanges(t *testing.T) {
+	path := initRepo(t)
+	r := Runner{Binary: "git"}
+	if err := os.WriteFile(filepath.Join(path, "file.txt"), []byte("one\ntwo\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	testGit(t, path, "add", ".")
+	testGit(t, path, "-c", "user.name=Test", "-c", "user.email=test@example.test", "commit", "-m", "base")
+	if err := os.WriteFile(filepath.Join(path, "file.txt"), []byte("one\nthree\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	status, err := r.Status(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(status.Files) != 1 || status.Files[0].WorktreeAdditions != 1 || status.Files[0].WorktreeDeletions != 1 || status.Files[0].IndexAdditions != 0 {
+		t.Fatalf("unexpected worktree stats: %+v", status.Files)
+	}
+	if err := r.Stage(context.Background(), path, "file.txt", true); err != nil {
+		t.Fatal(err)
+	}
+	status, err = r.Status(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(status.Files) != 1 || status.Files[0].IndexAdditions != 1 || status.Files[0].IndexDeletions != 1 || status.Files[0].WorktreeAdditions != 0 {
+		t.Fatalf("unexpected index stats: %+v", status.Files)
+	}
+}

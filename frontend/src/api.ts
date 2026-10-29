@@ -9,6 +9,7 @@ import type {
   GitStatus,
   Commit,
   Branch,
+  FileEntry,
 } from "./types";
 import { emptyState } from "./types";
 
@@ -85,12 +86,18 @@ interface Methods {
   OpenRepository: (id: string) => void;
   OpenCheckoutGitHub: (id: string, remote: string) => void;
   GitStatus: (id: string) => GitStatus;
+  GitFiles: (id: string) => FileEntry[];
   GitDiff: (id: string, file: string, staged: boolean) => string;
   GitHistory: (id: string) => Commit[];
   GitCommitDiff: (id: string, hash: string) => string;
   GitBranches: (id: string) => Branch[];
   StageFile: (id: string, file: string, stage: boolean) => void;
   StageFiles: (id: string, files: string[], stage: boolean) => void;
+  GitFileContent: (id: string, file: string) => string;
+  SaveWorkingFile: (id: string, file: string, content: string) => void;
+  CreateWorkingFile: (id: string, file: string) => void;
+  AddToGitignore: (id: string, file: string, directory: boolean) => void;
+  UntrackFile: (id: string, file: string, recursive: boolean) => void;
   CommitChanges: (id: string, remote: string, message: string) => string;
   SwitchBranch: (id: string, name: string, create: boolean) => string;
   GitNetwork: (id: string, remote: string, operation: string) => string;

@@ -17,6 +17,16 @@ func (s *Service) GitStatus(id string) (gitexec.Status, error) {
 	defer cancel()
 	return s.runner().Status(ctx, c.Path)
 }
+
+func (s *Service) GitFiles(id string) ([]gitexec.FileEntry, error) {
+	c, err := s.gitCheckout(id)
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(s.ctx, 30*time.Second)
+	defer cancel()
+	return s.runner().Files(ctx, c.Path)
+}
 func (s *Service) GitDiff(id, file string, staged bool) (string, error) {
 	if err := gitexec.ValidFile(file); err != nil {
 		return "", err
