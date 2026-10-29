@@ -1,0 +1,11 @@
+bin/
+frontend/node_modules/
+frontend/dist/
+.taste-skill/inspect/
+*.exe
+*.test
+*.log
+.env
+coverage.out
+*.tsbuildinfo
+*.syso

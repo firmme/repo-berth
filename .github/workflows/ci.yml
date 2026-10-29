@@ -1,0 +1,56 @@
+name: Build and test
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install Linux desktop dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libgtk-4-dev libwebkitgtk-6.0-dev libx11-dev pkg-config
+      - run: npm ci
+        working-directory: frontend
+      - run: npm test
+        working-directory: frontend
+      - run: node scripts/build.mjs --allow-unconfigured-auth
+        env:
+          REPO_BERTH_GITHUB_CLIENT_ID: ${{ vars.REPO_BERTH_GITHUB_CLIENT_ID }}
+      - run: go test ./...
+      - run: go vet ./...
+      - name: Race tests
+        if: runner.os == 'Linux'
+        run: go test -race ./...
+      - name: Package and verify Windows archive
+        if: runner.os == 'Windows'
+        env:
+          REPO_BERTH_GITHUB_CLIENT_ID: ${{ vars.REPO_BERTH_GITHUB_CLIENT_ID }}
+        run: |
+          node scripts/package-windows.mjs --skip-build
+          node scripts/verify-package.mjs --no-native
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'Windows'
+        with:
+          name: repo-berth-${{ runner.os }}-${{ runner.arch }}
+          path: |
+            bin/releases/*.zip
+            bin/releases/*.sha256
+      - uses: actions/upload-artifact@v4
+        if: runner.os != 'Windows'
+        with:
+          name: repo-berth-${{ runner.os }}-${{ runner.arch }}
+          path: bin/
