@@ -83,6 +83,7 @@ interface Methods {
   ConvertRemoteHTTPS: (id: string, remote: string) => void;
   OpenCheckout: (id: string, kind: string) => void;
   OpenRepository: (id: string) => void;
+  OpenCheckoutGitHub: (id: string, remote: string) => void;
   GitStatus: (id: string) => GitStatus;
   GitDiff: (id: string, file: string, staged: boolean) => string;
   GitHistory: (id: string) => Commit[];

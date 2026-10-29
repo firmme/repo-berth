@@ -503,6 +503,37 @@ func (s *Service) OpenRepository(id string) error {
 	}
 	return model.Err("REPOSITORY_MISSING", "仓库不存在")
 }
+
+// OpenCheckoutGitHub opens the selected remote directly, including repositories
+// shared locally that have not been added to the synchronized cloud catalogue.
+func (s *Service) OpenCheckoutGitHub(id, remote string) error {
+	c, err := s.gitCheckout(id)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(s.ctx, 15*time.Second)
+	defer cancel()
+	remotes, err := s.runner().Remotes(ctx, c.Path)
+	if err != nil {
+		return err
+	}
+	target := ""
+	for _, r := range remotes {
+		if r.Name == remote {
+			target = remoteKey(r.URL)
+		}
+	}
+	if target == "" {
+		return model.Err("REMOTE_INVALID", "当前 remote 不是 GitHub 仓库")
+	}
+	s.mu.Lock()
+	d := s.desktop
+	s.mu.Unlock()
+	if d == nil {
+		return model.Err("DESKTOP_REQUIRED", "请在桌面应用中打开网页")
+	}
+	return d.OpenURL("https://github.com/" + target)
+}
 func (s *Service) OpenGitHubPage(kind string) error {
 	urls := map[string]string{"device": "https://github.com/login/device", "settings": "https://github.com/settings/developers", "authorizations": "https://github.com/settings/applications"}
 	url, ok := urls[kind]

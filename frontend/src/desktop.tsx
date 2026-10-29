@@ -88,6 +88,7 @@ type MenuNode = {
   label: string;
   action?: () => void;
   disabled?: boolean;
+  hidden?: boolean;
   children?: { label: string; action: () => void; checked?: boolean }[];
 };
 export default function Desktop() {
@@ -173,6 +174,9 @@ export default function Desktop() {
     ? requestedRemote
     : "";
   const tracking = status.data?.tracking?.find((t) => t.remote === remote);
+  const githubPath = githubRepositoryPath(
+    remotes.find((r) => r.name === remote)?.url || "",
+  );
   const upstreamRemote = status.data?.upstream?.split("/")[0] || "";
   const matchingUpstream = !!remote && upstreamRemote === remote;
   const ahead = tracking?.ahead ?? (matchingUpstream ? status.data?.ahead ?? 0 : 0);
@@ -439,16 +443,21 @@ export default function Desktop() {
       },
       {
         label: "在 GitHub 中查看",
-        disabled: !selected?.repository,
-        action: () => void execute(() => api("OpenRepository", selected!.id)),
+        disabled: !(checkout && githubPath) && !selected?.repository,
+        action: () => {
+          if (checkout && githubPath)
+            void execute(() =>
+              api("OpenCheckoutGitHub", checkout.id, remote),
+            );
+          else if (selected?.repository)
+            void execute(() => api("OpenRepository", selected.id));
+        },
       },
       {
         label: "分享到 GitHub…",
+        hidden: remotes.some((r) => /github\.com/i.test(r.url)),
         disabled:
-          !checkout ||
-          !!checkout.plainDirectory ||
-          !st.accounts.length ||
-          remotes.some((r) => /github\.com/i.test(r.url)),
+          !checkout || !!checkout.plainDirectory || !st.accounts.length,
         action: () => show("share"),
       },
       {
@@ -571,7 +580,9 @@ export default function Desktop() {
                 branchPopup
               ) : (
                 <div className="desktop-popover menu-popover">
-                  {menuItems[id]?.map((item) =>
+                  {menuItems[id]
+                    ?.filter((item) => !item.hidden)
+                    .map((item) =>
                     item.children ? (
                       <div className="menu-submenu" key={item.label}>
                         <button
