@@ -62,14 +62,17 @@ func (s *Service) commitIdentity(id, remote string) (model.CommitProfile, error)
 			if c.CommitName != "" {
 				return model.CommitProfile{Name: c.CommitName, Email: c.CommitEmail}, nil
 			}
+			binding, p, err := accessBinding(&st, id, remote)
+			if err == nil && p.Name != "" {
+				return p, nil
+			}
+			if binding.AccountID != "" {
+				return model.CommitProfile{}, model.Err("IDENTITY_REQUIRED", "请为当前访问账号设置提交姓名和邮箱，或为此项目单独指定")
+			}
 			if st.Settings.DefaultCommitName != "" {
 				return model.CommitProfile{Name: st.Settings.DefaultCommitName, Email: st.Settings.DefaultCommitEmail}, nil
 			}
-			_, p, err := s.binding(id, remote)
-			if err == nil && p.Name == "" {
-				return p, model.Err("IDENTITY_REQUIRED", "请在设置中填写默认提交姓名和邮箱，或为此项目单独指定")
-			}
-			return p, err
+			return model.CommitProfile{}, model.Err("IDENTITY_REQUIRED", "请为当前访问账号设置提交姓名和邮箱，或为此项目单独指定")
 		}
 	}
 	return model.CommitProfile{}, model.Err("CHECKOUT_MISSING", "本地目录不存在")

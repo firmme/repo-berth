@@ -63,6 +63,24 @@ func (s *Service) StageFile(id, file string, stage bool) error {
 	}
 	return s.runner().Stage(s.ctx, c.Path, file, stage)
 }
+
+// StageFiles applies a user's bulk selection under one checkout lock. The
+// individual runner preserves rename and unborn-branch behavior.
+func (s *Service) StageFiles(id string, files []string, stage bool) error {
+	c, err := s.gitCheckout(id)
+	if err != nil {
+		return err
+	}
+	lock := s.workLock(c.Path)
+	if err := lock.Lock(s.ctx); err != nil {
+		return err
+	}
+	defer lock.Unlock()
+	if err := s.validateCheckout(c); err != nil {
+		return err
+	}
+	return s.runner().StageMany(s.ctx, c.Path, files, stage)
+}
 func (s *Service) binding(checkoutID, remote string) (model.RepositoryBinding, model.CommitProfile, error) {
 	st, err := s.Snapshot()
 	if err != nil {

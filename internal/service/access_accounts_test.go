@@ -39,8 +39,8 @@ func TestAccessSelectionBindsCurrentRemoteAndRemembersFallbackIndependently(t *t
 		t.Fatal(err)
 	}
 	b, p, err = s.binding(id, "origin")
-	if err != nil || b.AccountID != "work" || p.Name != "Author" {
-		t.Fatalf("selection changed author or wrong access %v %+v %+v", err, b, p)
+	if err != nil || b.AccountID != "work" || p.Name != "" {
+		t.Fatalf("selection kept the previous account's author or wrong access %v %+v %+v", err, b, p)
 	}
 	if err = s.SetAccessAccount("", "", "personal"); err != nil {
 		t.Fatal(err)

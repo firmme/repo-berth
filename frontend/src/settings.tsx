@@ -8,7 +8,6 @@ import {
   ExternalLink,
   KeyRound,
   Trash2,
-  RefreshCw,
   Save,
   GitCommitHorizontal,
   Settings2,
@@ -23,12 +22,11 @@ import {
   ErrorNotice,
   Field,
   Modal,
-  Stamp,
 } from "./components";
 
 export function AccountsView({ st, execute }: { st: State; execute: Execute }) {
   const [auth, setAuth] = useState<Authorization>();
-  const [sessionOnly, setSessionOnly] = useState(false);
+  const [codeCopied, setCodeCopied] = useState(false);
   const [remove, setRemove] = useState<Account>();
   const [busy, setBusy] = useState(false);
   const [recovering, setRecovering] = useState(false);
@@ -38,7 +36,20 @@ export function AccountsView({ st, execute }: { st: State; execute: Execute }) {
       setBusy(true);
       setRecovering(false);
       try {
-        setAuth(await api("StartAuthorization", sessionOnly, id));
+        const authorization = await api("StartAuthorization", false, id);
+        setAuth(authorization);
+        setCodeCopied(false);
+        try {
+          if (isDesktop) {
+            const { Clipboard } = await import("@wailsio/runtime");
+            await Clipboard.SetText(authorization.userCode);
+          } else {
+            await navigator.clipboard.writeText(authorization.userCode);
+          }
+          setCodeCopied(true);
+        } catch {
+          // The visible copy button remains available if clipboard access fails.
+        }
       } finally {
         setBusy(false);
       }
@@ -62,7 +73,6 @@ export function AccountsView({ st, execute }: { st: State; execute: Execute }) {
       <div className="page-heading inset-heading">
         <div>
           <h1>账号与身份</h1>
-          <p>访问权限与提交署名，分别管理。</p>
         </div>
         <button
           className="primary"
@@ -91,30 +101,12 @@ export function AccountsView({ st, execute }: { st: State; execute: Execute }) {
           </div>
         </div>
       )}
-      <div className="authorization-note">
-        <KeyRound size={19} />
-        <div>
-          <strong>通过系统浏览器授权</strong>
-          <p>
-            授权信息保存在系统凭据库。GitHub 的 repo
-            权限允许读写可访问的公开与私有仓库；工作流文件可能需要额外权限。
-          </p>
-          <label className="checkbox-label">
-            <input
-              type="checkbox"
-              checked={sessionOnly}
-              onChange={(e) => setSessionOnly(e.target.checked)}
-            />
-            仅在本次应用会话保存凭据
-          </label>
-        </div>
-      </div>
       {st.accounts.length === 0 ? (
         <div className="account-empty">
           <Github size={30} strokeWidth={1.2} />
           <h2>连接你的第一个 GitHub 账号</h2>
           <p>
-            个人账号和工作账号可以同时保持登录。
+            可以同时连接多个 GitHub 账号。
             <br />
             点击“添加 GitHub 账号”，在系统浏览器中确认授权即可。
           </p>
@@ -243,13 +235,22 @@ export function AccountsView({ st, execute }: { st: State; execute: Execute }) {
                   <code>{auth.userCode}</code>
                   <button
                     aria-label="复制验证码"
-                    onClick={() =>
-                      void navigator.clipboard.writeText(auth.userCode)
-                    }
+                    onClick={() => {
+                      void (async () => {
+                        try {
+                          if (isDesktop) {
+                            const { Clipboard } = await import("@wailsio/runtime");
+                            await Clipboard.SetText(auth.userCode);
+                          } else await navigator.clipboard.writeText(auth.userCode);
+                          setCodeCopied(true);
+                        } catch { setCodeCopied(false); }
+                      })();
+                    }}
                   >
-                    <Copy size={16} />
+                    {codeCopied ? <Check size={16} /> : <Copy size={16} />}
                   </button>
                 </div>
+                <p className="muted" role="status">{codeCopied ? "验证码已自动复制，可直接粘贴" : "请点击复制按钮复制验证码"}</p>
                 <a
                   href={auth.verificationUri}
                   target="_blank"
@@ -311,7 +312,6 @@ export function AccountsView({ st, execute }: { st: State; execute: Execute }) {
       {newProfileAccount && (
         <ProfileModal
           account={newProfileAccount}
-          inUse={false}
           execute={execute}
           onClose={() => setNewProfileAccount(undefined)}
         />
@@ -332,11 +332,8 @@ function AccountPanel({
   onAuthorize: () => void;
   onRemove: () => void;
 }) {
-  const [note, setNote] = useState(a.note);
-  const [color, setColor] = useState(a.color);
   const [profileOpen, setProfileOpen] = useState(false);
-  const [editingProfile, setEditingProfile] = useState<Profile>();
-  const profiles = st.profiles.filter((p) => p.accountId === a.id);
+  const profile = st.profiles.find((p) => p.accountId === a.id);
   return (
     <section className="account-panel">
       <div className="account-panel-header">
@@ -357,12 +354,6 @@ function AccountPanel({
         </div>
         <div className="actions">
           <button
-            onClick={() => void execute(() => api("SyncRepositories", a.id))}
-          >
-            <RefreshCw size={14} />
-            同步
-          </button>
-          <button
             className="icon-button"
             aria-label={`移除 ${a.login}`}
             onClick={onRemove}
@@ -371,80 +362,33 @@ function AccountPanel({
           </button>
         </div>
       </div>
-      <div className="account-fields">
-        <Field label="账号备注">
-          <input
-            placeholder="例如：工作账号"
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-          />
-        </Field>
-        <Field label="识别颜色">
-          <input
-            type="color"
-            value={color}
-            onChange={(e) => setColor(e.target.value)}
-          />
-        </Field>
-        <button
-          onClick={() =>
-            void execute(() => api("UpdateAccount", a.id, note, color))
-          }
-        >
-          保存备注
-        </button>
-      </div>
       <div className="profile-heading">
         <h3>
           <GitCommitHorizontal size={16} />
-          提交身份
+          提交信息
         </h3>
         <button
           className="text-button"
-          onClick={() => {
-            setEditingProfile(undefined);
-            setProfileOpen(true);
-          }}
+          onClick={() => setProfileOpen(true)}
         >
-          <Plus size={14} />
-          添加身份
+          {profile ? "编辑" : "设置"}
         </button>
       </div>
-      {profiles.length === 0 ? (
+      {!profile ? (
         <p className="empty-note">
-          尚未确认提交姓名和邮箱。克隆或提交前，请先添加身份。
+          尚未设置提交姓名和邮箱。克隆或提交前请先设置。
         </p>
       ) : (
-        profiles.map((p) => (
-          <div className="profile-row" key={p.id}>
-            <strong>{p.name}</strong>
-            <span>{p.email}</span>
-            <button
-              className="text-button"
-              onClick={() => {
-                setEditingProfile(p);
-                setProfileOpen(true);
-              }}
-            >
-              编辑
-            </button>
-          </div>
-        ))
+        <div className="profile-row">
+          <strong>{profile.name}</strong>
+          <span>{profile.email}</span>
+        </div>
       )}
-      <div className="account-footer">
-        <span>
-          仓库同步：
-          <Stamp date={a.syncedAt} />
-        </span>
-        <button className="text-button" onClick={onAuthorize}>
-          重新授权
-        </button>
-      </div>
+      {a.status === "auth_required" && <div className="account-footer"><button className="text-button" onClick={onAuthorize}>重新授权</button></div>}
       {profileOpen && (
         <ProfileModal
           account={a}
-          existing={editingProfile}
-          inUse={st.bindings.some((b) => b.profileId === editingProfile?.id)}
+          existing={profile}
           execute={execute}
           onClose={() => setProfileOpen(false)}
         />
@@ -455,13 +399,11 @@ function AccountPanel({
 function ProfileModal({
   account,
   existing,
-  inUse,
   execute,
   onClose,
 }: {
   account: Account;
   existing?: Profile;
-  inUse: boolean;
   execute: Execute;
   onClose: () => void;
 }) {
@@ -469,7 +411,6 @@ function ProfileModal({
     existing?.name || account.name || account.login,
   );
   const [email, setEmail] = useState(existing?.email || "");
-  const [confirmed, setConfirmed] = useState(false);
   const emails = useQuery({
     queryKey: ["emails", account.id],
     queryFn: () => api("AccountEmails", account.id),
@@ -523,40 +464,16 @@ function ProfileModal({
         {emails.isError && (
           <p className="muted">无法获取账号邮箱，你仍可手动填写。</p>
         )}
-        <label className="checkbox-label">
-          <input
-            type="checkbox"
-            checked={confirmed}
-            onChange={(e) => setConfirmed(e.target.checked)}
-          />
-          我已确认此姓名和邮箱用于 Git 提交
-        </label>
         {existing && (
           <p className="subtle-note">
             保存后，绑定此身份的仓库将在下次操作中使用新信息；已排队的提交会要求重新确认。
           </p>
         )}
-        {existing && (
-          <button
-            type="button"
-            className="text-button danger"
-            disabled={inUse}
-            title={inUse ? "请先为相关仓库选择其他身份" : "删除此提交身份"}
-            onClick={() =>
-              void execute(async () => {
-                await api("DeleteProfile", existing.id);
-                onClose();
-              })
-            }
-          >
-            删除身份{inUse ? "（仍有仓库使用）" : ""}
-          </button>
-        )}
         <div className="form-actions">
           <button type="button" onClick={onClose}>
             取消
           </button>
-          <button className="primary" disabled={!confirmed}>
+          <button className="primary">
             <Check size={15} />
             保存身份
           </button>
@@ -575,7 +492,6 @@ export function SettingsView({ st, execute }: { st: State; execute: Execute }) {
       <div className="page-heading inset-heading">
         <div>
           <h1>设置</h1>
-          <p>本地环境与外部工具。</p>
         </div>
       </div>
       <CredentialCleanupNotice st={st} execute={execute} />
@@ -591,42 +507,7 @@ export function SettingsView({ st, execute }: { st: State; execute: Execute }) {
       >
         <section className="settings-row">
           <div>
-            <h2>默认提交信息</h2>
-            <p>
-              所有项目默认使用此姓名和邮箱，项目中单独指定的提交信息优先。不修改全局
-              Git 配置。
-            </p>
-          </div>
-          <div className="settings-panel">
-            <Field label="默认提交姓名">
-              <input
-                value={settings.defaultCommitName || ""}
-                onChange={(e) =>
-                  setSettings({
-                    ...settings,
-                    defaultCommitName: e.target.value,
-                  })
-                }
-              />
-            </Field>
-            <Field label="默认提交邮箱">
-              <input
-                type="email"
-                value={settings.defaultCommitEmail || ""}
-                onChange={(e) =>
-                  setSettings({
-                    ...settings,
-                    defaultCommitEmail: e.target.value,
-                  })
-                }
-              />
-            </Field>
-          </div>
-        </section>
-        <section className="settings-row">
-          <div>
             <h2>GitHub 账号</h2>
-            <p>通过浏览器添加个人账号或工作账号。登录配置由应用提供。</p>
           </div>
           <div className="settings-panel">
             <button
@@ -640,7 +521,6 @@ export function SettingsView({ st, execute }: { st: State; execute: Execute }) {
         <section className="settings-row">
           <div>
             <h2>Git 环境</h2>
-            <p>使用系统安装的 Git。应用内操作不会修改全局 Git 配置。</p>
           </div>
           <div className="settings-panel">
             <Field label="Git 可执行文件">
@@ -680,7 +560,6 @@ export function SettingsView({ st, execute }: { st: State; execute: Execute }) {
         <section className="settings-row">
           <div>
             <h2>仓库与编辑器</h2>
-            <p>设置克隆目录和打开仓库的默认编辑器。</p>
           </div>
           <div className="settings-panel">
             <DirectoryField
@@ -693,7 +572,7 @@ export function SettingsView({ st, execute }: { st: State; execute: Execute }) {
             />
             <Field
               label="编辑器可执行文件"
-              hint="留空使用 code；填写可执行文件路径，不包含命令参数。"
+              hint="留空使用 code"
             >
               <input
                 value={settings.editorPath}

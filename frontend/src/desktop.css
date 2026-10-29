@@ -9,6 +9,16 @@
   --ground: #f6f8fa;
   --surface: #fff;
   --active: #e8edf2;
+  --pane: #f3f6f9;
+  --pane-emphasis: #eaf0f6;
+  --canvas: #fff;
+  --row: #fff;
+  --row-hover: #eaf2fc;
+  --row-selected: #dceafb;
+  --field: #fff;
+  --field-border: #aebbc8;
+  --secondary-text: #526474;
+  --soft-border: #d8e0e8;
   display: flex;
   flex-direction: column;
   height: 100dvh;
@@ -40,7 +50,7 @@
   cursor: default;
 }
 .desktop-menubar {
-  height: 29px;
+  height: 38px;
   flex: none;
   display: flex;
   align-items: center;
@@ -55,6 +65,30 @@
   margin-right: 5px;
   border-radius: 3px;
 }
+.desktop-title-drag {
+  flex: 1;
+  height: 100%;
+  min-width: 24px;
+  --wails-draggable: drag;
+}
+.desktop-window-controls {
+  display: flex;
+  align-items: stretch;
+  align-self: stretch;
+  margin-right: -9px;
+  --wails-draggable: no-drag;
+}
+.desktop-menubar .desktop-window-controls > button {
+  width: 46px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 0;
+}
+.desktop-menubar .desktop-window-controls > button:last-child:hover {
+  background: #c42b36;
+  color: #fff;
+}
 .desktop-app-name {
   font-size: 13px;
   margin: 0 12px 0 2px;
@@ -63,6 +97,7 @@
 .desktop-menubar > div {
   position: relative;
   height: 100%;
+  --wails-draggable: no-drag;
 }
 .desktop-menubar button {
   height: 100%;
@@ -296,8 +331,8 @@
 }
 .repository-picker-tools {
   padding: 10px;
-  background: #f6f8fa;
-  border-bottom: 1px solid #d8dee4;
+  background: var(--pane);
+  border-bottom: 1px solid var(--soft-border);
   display: grid;
   gap: 8px;
 }
@@ -305,10 +340,10 @@
   display: flex;
   align-items: center;
   gap: 7px;
-  border: 1px solid #afb8c1;
+  border: 1px solid var(--field-border);
   border-radius: 4px;
   padding: 0 8px;
-  background: #fff;
+  background: var(--field);
 }
 .repository-picker-tools label input {
   width: 100%;
@@ -319,7 +354,7 @@
 }
 .repository-picker-tools select {
   width: 100%;
-  background: #fff;
+  background: var(--field);
 }
 .repository-picker-list {
   overflow: auto;
@@ -328,22 +363,26 @@
   flex: 1;
 }
 .repository-picker-group {
-  border-bottom: 1px solid #eef0f2;
+  border-bottom: 1px solid var(--soft-border);
 }
 .repository-popover .repository-row {
-  padding: 11px 13px;
+  padding: 9px 13px;
   display: flex;
   align-items: center;
   gap: 9px;
   width: 100%;
   min-width: 0;
-  background: #fff;
+  background: var(--row);
   border: 0;
   text-align: left;
   border-radius: 0;
 }
 .repository-popover .repository-row.selected {
-  background: #e8f0fa;
+  background: var(--row-selected);
+  box-shadow: inset 3px 0 var(--accent);
+}
+.repository-popover .repository-row:hover:not(.selected) {
+  background: var(--row-hover);
 }
 .repository-row > span {
   min-width: 0;
@@ -361,7 +400,7 @@
 }
 .repository-row small {
   font-size: 11px;
-  color: #57606a;
+  color: var(--secondary-text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -370,13 +409,13 @@
   display: flex;
   justify-content: space-between;
   padding: 7px;
-  border-top: 1px solid #d8dee4;
-  background: #f6f8fa;
+  border-top: 1px solid var(--soft-border);
+  background: var(--pane);
   gap: 6px;
 }
 .repository-popover footer button {
   padding: 4px 7px;
-  font-size: 11px;
+  font-size: 12px;
   display: flex;
   align-items: center;
 }
@@ -425,7 +464,7 @@
   font-size: 11px;
 }
 .desktop-menubar .branch-popover {
-  top: 29px;
+  top: 38px;
 }
 .desktop-workspace {
   display: grid;
@@ -438,20 +477,20 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
-  background: #f6f8fa;
-  border-right: 1px solid #d8dee4;
+  background: var(--pane);
+  border-right: 1px solid var(--soft-border);
 }
 .desktop-tabs {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  background: white;
+  background: var(--pane-emphasis);
   height: 36px;
   flex: none;
-  border-bottom: 1px solid #d8dee4;
+  border-bottom: 1px solid var(--soft-border);
 }
 .desktop-tabs button {
   border: 0;
-  background: white;
+  background: transparent;
   border-radius: 0;
   justify-content: center;
   border-bottom: 3px solid transparent;
@@ -464,6 +503,7 @@
 .desktop-tabs button.active {
   border-bottom-color: #0969da;
   color: #0969da;
+  background: var(--canvas);
 }
 .desktop-tabs button span {
   font-size: 11px;
@@ -478,8 +518,8 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  border: 1px solid #afb8c1;
-  background: #fff;
+  border: 1px solid var(--field-border);
+  background: var(--field);
   border-radius: 4px;
   padding: 0 7px;
   height: 27px;
@@ -501,8 +541,8 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  border-bottom: 1px solid #d8dee4;
-  color: #57606a;
+  border-bottom: 1px solid var(--soft-border);
+  color: var(--secondary-text);
   font-size: 11px;
   flex: none;
 }
@@ -519,18 +559,47 @@
   min-height: 40px;
   overflow: auto;
   flex: 1;
-  background: #fff;
+  background: var(--row);
 }
 .desktop-file-row {
-  height: 35px;
+  height: 38px;
   display: flex;
   align-items: center;
-  padding-left: 11px;
-  gap: 8px;
-  border-bottom: 1px solid #f0f2f4;
+  padding-left: 5px;
+  gap: 3px;
+  background: var(--row);
+  border-bottom: 1px solid var(--soft-border);
+  transition: background-color .1s ease, box-shadow .1s ease;
+}
+.desktop-file-row:hover {
+  background: var(--row-hover);
 }
 .desktop-file-row.selected {
-  background: #e8f1fd;
+  background: var(--row-selected);
+  box-shadow: inset 3px 0 var(--accent);
+}
+.desktop-file-row.selected:hover {
+  background: var(--row-selected);
+}
+.file-stage-toggle {
+  display: grid;
+  place-items: center;
+  flex: none;
+  height: 100%;
+  width: 31px;
+  cursor: pointer;
+  border-radius: 4px;
+}
+.file-stage-toggle:hover {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.file-stage-toggle:has(input:disabled) { cursor: default; }
+.desktop-stage-error {
+  padding: 7px 10px;
+  color: #a62432;
+  background: #fff0f1;
+  border-bottom: 1px solid #e8bcc3;
+  font-size: 11px;
 }
 .desktop-file-row > button.file-name {
   display: flex;
@@ -542,7 +611,7 @@
   padding: 5px 10px 5px 0;
   border: 0;
   background: transparent;
-  color: #24292f;
+  color: var(--text);
 }
 .desktop-file-row .file-name span {
   overflow: hidden;
@@ -551,6 +620,9 @@
   flex: 1;
   text-align: left;
   font-size: 13px;
+}
+.desktop-file-row > button.file-name:hover {
+  color: var(--text);
 }
 .desktop-file-row code {
   font-family: Consolas, monospace;
@@ -565,11 +637,14 @@
 .desktop-file-row code.removed {
   color: #cf222e;
 }
+:root[data-theme="dark"] .desktop-file-row code { color: #f0bb72; }
+:root[data-theme="dark"] .desktop-file-row code.added { color: #74dba4; }
+:root[data-theme="dark"] .desktop-file-row code.removed { color: #ff9099; }
 .desktop-commit {
   flex: none;
   padding: 10px;
-  border-top: 1px solid #d8dee4;
-  background: #f6f8fa;
+  border-top: 1px solid var(--soft-border);
+  background: var(--pane);
   display: grid;
   gap: 8px;
 }
@@ -582,6 +657,9 @@
   background: none;
   text-align: left;
   min-height: 29px;
+}
+.desktop-commit .commit-identity:hover {
+  background: var(--row-hover);
 }
 .commit-identity > span:nth-child(2) {
   min-width: 0;
@@ -596,7 +674,7 @@
 }
 .commit-identity small {
   font-size: 11px;
-  color: #57606a;
+  color: var(--secondary-text);
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -615,8 +693,8 @@
 .desktop-commit > input,
 .desktop-commit > textarea {
   width: 100%;
-  background: #fff;
-  border: 1px solid #afb8c1;
+  background: var(--field);
+  border: 1px solid var(--field-border);
   padding: 7px 8px;
   min-height: 29px;
   line-height: 1.45;
@@ -629,7 +707,7 @@
 }
 .commit-caption {
   font-size: 11px;
-  color: #57606a;
+  color: var(--secondary-text);
   min-height: 14px;
 }
 .desktop-shell .desktop-primary {
@@ -676,46 +754,28 @@
   color: #57606a;
   margin: 0 0 26px;
 }
-.desktop-next-actions {
-  border: 1px solid #d8dee4;
-  border-radius: 5px;
-  overflow: hidden;
-  margin-top: 28px;
-}
-.desktop-action-row {
-  padding: 20px;
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  min-height: 89px;
-}
-.desktop-action-row + .desktop-action-row {
-  border-top: 1px solid #d8dee4;
-}
-.desktop-action-row > div {
-  flex: 1;
-  min-width: 0;
-}
-.desktop-action-row strong {
-  font-size: 13px;
-  font-weight: 600;
-}
-.desktop-action-row p {
-  font-size: 13px;
-  line-height: 1.55;
-  color: #57606a;
-  margin: 5px 0 0;
+.desktop-start > .desktop-checkout-path {
+  margin: 4px 0 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.desktop-action-row button {
+.desktop-next-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 20px;
+}
+.desktop-shell .desktop-action-row {
   white-space: nowrap;
   border: 1px solid #afb8c1;
   background: #f6f8fa;
   font-size: 13px;
-  padding: 4px 10px;
-  flex: none;
+  padding: 7px 13px;
+  min-height: 34px;
+}
+.desktop-shell .desktop-action-row:hover {
+  background: #eaf2fc;
 }
 .desktop-start .desktop-context-note {
   font-size: 13px;
@@ -1023,22 +1083,29 @@
   font-weight: 600;
 }
 .desktop-shell .modal-body {
-  padding: 20px;
+  padding: 16px 20px;
 }
 .desktop-shell dialog .page-content {
   padding: 0;
 }
 .desktop-shell dialog .page-heading {
-  margin-bottom: 18px;
+  min-height: 0;
+  padding: 0 0 14px;
+  margin-bottom: 0;
 }
+.desktop-shell dialog .settings-page .page-heading { display: none; }
 .desktop-shell dialog .page-heading h1 {
   display: none;
 }
 .desktop-shell dialog .page-heading p {
   font-size: 13px;
 }
+.desktop-shell dialog .page-heading > div:empty {
+  display: none;
+}
 .desktop-shell dialog .account-panel {
-  padding: 18px;
+  padding: 14px;
+  margin-bottom: 10px;
 }
 .desktop-shell dialog .authorization-note {
   padding: 16px;
@@ -1046,9 +1113,9 @@
   border-radius: 5px;
 }
 .desktop-shell dialog .settings-row {
-  grid-template-columns: 200px minmax(0, 1fr);
-  gap: 20px;
-  padding: 20px 0;
+  grid-template-columns: 150px minmax(0, 1fr);
+  gap: 16px;
+  padding: 14px 0;
 }
 .desktop-shell dialog .settings-row h2 {
   font-size: 14px;
@@ -1056,6 +1123,25 @@
 .desktop-shell dialog .settings-row p {
   font-size: 13px;
 }
+.desktop-shell dialog .settings-row h2 { margin: 5px 0 0; }
+.desktop-shell dialog .settings-panel {
+  padding: 0;
+  background: transparent;
+}
+.desktop-shell dialog .settings-panel .field {
+  gap: 5px;
+  margin-bottom: 10px;
+}
+.desktop-shell dialog .settings-panel button { min-height: 31px; }
+.desktop-shell dialog .settings-save {
+  padding-top: 14px;
+  border-top: 1px solid var(--rule);
+}
+.desktop-shell dialog .account-panel .profile-row { padding-bottom: 0; }
+.desktop-shell dialog .account-panel .profile-heading { margin-top: 14px; }
+.desktop-shell dialog .account-panel-header p { margin: 2px 0 0; }
+.desktop-shell dialog .form-description { margin-bottom: 12px; }
+.desktop-shell dialog .form-actions { margin-top: 16px; }
 .desktop-repo-options {
   display: grid;
   gap: 16px;
@@ -1148,14 +1234,6 @@
   .desktop-start {
     width: calc(100% - 56px);
   }
-  .desktop-action-row {
-    padding: 16px;
-    gap: 12px;
-    align-items: flex-start;
-  }
-  .desktop-action-row button {
-    margin-top: 2px;
-  }
 }
 @media (max-width: 900px) {
   .repository-unit {
@@ -1179,11 +1257,6 @@
   }
   .toolbar-unit > button > svg {
     width: 16px;
-  }
-  .desktop-action-row {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 12px;
   }
   .desktop-start {
     margin-top: 34px;
@@ -1251,9 +1324,6 @@
   }
   .desktop-start h2 {
     font-size: 24px;
-  }
-  .desktop-action-row {
-    padding: 17px;
   }
   .repository-popover {
     position: fixed;
@@ -1323,11 +1393,6 @@
   }
 }
 
-@media (max-width: 900px) {
-  .desktop-action-row > div {
-    width: 100%;
-  }
-}
 @media (max-width: 700px) {
   .desktop-workspace.clean-state > .desktop-sidebar {
     display: none;
@@ -1359,6 +1424,10 @@
 }
 .local-management-row > span {
   min-width: 0;
+  flex: 1;
+}
+.local-management-row > button {
+  flex: none;
 }
 .local-management-row strong,
 .local-management-row small {
@@ -1402,6 +1471,108 @@
   justify-content: flex-start;
   text-align: left;
 }
+
+/* Denser history, with a persistent file navigator beside the diff. */
+.desktop-history-list > button {
+  min-height: 46px;
+  padding: 6px 10px;
+  align-items: center;
+  gap: 8px;
+  border-bottom-color: var(--rule);
+}
+.desktop-history-list > button > span { gap: 2px; }
+.desktop-history-list > button:hover { background: #eaf1f8; }
+.desktop-history-list > button.selected { background: #dceafb; box-shadow: inset 3px 0 var(--accent); }
+.desktop-history-content { display: flex; flex: 1; min-height: 0; min-width: 0; }
+.desktop-history-content .desktop-diff { min-width: 0; }
+.desktop-history-tree { width: 224px; flex: none; overflow: auto; border-right: 1px solid var(--control); background: #f3f6fa; }
+.history-tree-heading { display: flex; justify-content: space-between; padding: 10px 12px 8px; font-size: 11px; font-weight: 600; color: var(--muted); border-bottom: 1px solid var(--rule); }
+.desktop-shell .desktop-history-tree button { display: flex; justify-content: flex-start; width: 100%; min-height: 29px; height: auto; border: 0; border-radius: 0; background: transparent; text-align: left; padding: 5px 10px; color: var(--text); }
+.desktop-history-tree button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.desktop-history-tree .history-folder { font-weight: 600; }
+.desktop-history-tree .history-folder svg { transition: transform .14s ease; }
+.desktop-history-tree .history-folder svg.collapsed { transform: rotate(-90deg); }
+.desktop-shell .desktop-history-tree button:hover { background: #e4edf7; }
+.desktop-shell .desktop-history-tree button.selected { background: #dceafb; color: #084b9a; box-shadow: inset 3px 0 var(--accent); }
+.desktop-shell :is(button, a, input, select, textarea):focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.desktop-shell :is(.repository-row, .desktop-tabs button, .desktop-history-list > button, .desktop-popover button, .desktop-history-tree button) { transition: background-color .14s ease, color .14s ease, box-shadow .14s ease; }
+.desktop-shell .desktop-primary:hover:not(:disabled) { background: #0755b4; border-color: #0755b4; }
+.desktop-shell .desktop-tabs button:hover:not(.active) { background: #edf3f9; color: #1b4f84; }
+.desktop-shell .repository-row:hover:not(.selected) { background: #eaf1f8; }
+.desktop-shell .desktop-popover button:hover:not(:disabled) { background: #eaf1f8; }
+@media (max-width: 800px) { .desktop-history-tree { width: 160px; } }
+@media (max-width: 550px) { .desktop-history-content { flex-direction: column; } .desktop-history-tree { width: 100%; max-height: 125px; border-right: 0; border-bottom: 1px solid var(--control); } }
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --ground: #111820; --surface: #1a232d; --raised: #25313e; --active: #30445a;
+  --border: #344352; --rule: #2a3845; --control: #536578;
+  --text: #e9f1f8; --muted: #b0c0ce; --faint: #9daebb;
+  --primary: #2686e5; --accent: #73b6ff; --positive: #6bd4a0; --negative: #ff858c;
+}
+:root[data-theme="dark"] .desktop-shell {
+  --accent: #73b6ff; --text: #e9f1f8; --muted: #b0c0ce; --control: #536578;
+  --rule: #2a3845; --ground: #111820; --surface: #1a232d; --active: #30445a;
+  background: #111820;
+}
+:root[data-theme="dark"] .desktop-menubar,
+:root[data-theme="dark"] .desktop-toolbar { background: #101820; color: #e9f1f8; }
+:root[data-theme="dark"] .desktop-sidebar,
+:root[data-theme="dark"] .desktop-history-tree,
+:root[data-theme="dark"] .desktop-tabs,
+:root[data-theme="dark"] .desktop-diff-header,
+:root[data-theme="dark"] .desktop-commit-info { background: #1a2530; border-color: #344352; color: #e9f1f8; }
+:root[data-theme="dark"] .desktop-detail,
+:root[data-theme="dark"] .desktop-diff,
+:root[data-theme="dark"] .desktop-history-list,
+:root[data-theme="dark"] .desktop-history-list > button,
+:root[data-theme="dark"] .desktop-tabs button { background: #17212a; color: #e9f1f8; }
+:root[data-theme="dark"] .desktop-history-list > button.selected,
+:root[data-theme="dark"] .desktop-shell .desktop-history-tree button.selected { background: #30445a; color: #d8ecff; }
+:root[data-theme="dark"] .desktop-history-list > button:hover,
+:root[data-theme="dark"] .desktop-shell .desktop-history-tree button:hover,
+:root[data-theme="dark"] .desktop-shell .desktop-popover button:hover:not(:disabled),
+:root[data-theme="dark"] .desktop-shell .repository-row:hover:not(.selected),
+:root[data-theme="dark"] .desktop-shell .desktop-tabs button:hover:not(.active) { background: #293b4e; color: #e9f1f8; }
+:root[data-theme="dark"] .desktop-shell .desktop-history-tree button { color: #e9f1f8; }
+:root[data-theme="dark"] .desktop-shell .desktop-primary { background: #2686e5; color: #fff; border-color: #2686e5; }
+:root[data-theme="dark"] .desktop-shell .desktop-primary:hover:not(:disabled) { background: #409af3; border-color: #409af3; }
+:root[data-theme="dark"] .desktop-shell .desktop-primary:disabled { background: #334555; color: #aab8c5; border-color: #455463; }
+:root[data-theme="dark"] .desktop-shell :is(input, textarea, select, dialog, .desktop-popover, .task-drawer, .modal-body) { background: #1a2530; color: #e9f1f8; border-color: #536578; }
+:root[data-theme="dark"] .desktop-start > :is(svg, p),
+:root[data-theme="dark"] .desktop-list-empty,
+:root[data-theme="dark"] .desktop-history-list small,
+:root[data-theme="dark"] .desktop-history-list svg,
+:root[data-theme="dark"] .desktop-empty-detail,
+:root[data-theme="dark"] .desktop-plain-directory h1 small,
+:root[data-theme="dark"] .desktop-commit-info,
+:root[data-theme="dark"] .desktop-diff-header > :is(span, code, svg) { color: #b0c0ce; }
+:root[data-theme="dark"] .desktop-shell .desktop-action-row { background: #253545; color: #e9f1f8; border-color: #536578; }
+:root[data-theme="dark"] .desktop-shell .desktop-action-row:hover { background: #293b4e; }
+:root[data-theme="dark"] .desktop-shell .repository-row,
+:root[data-theme="dark"] .desktop-shell .menu-popover > button,
+:root[data-theme="dark"] .desktop-shell .desktop-popover button,
+:root[data-theme="dark"] .desktop-shell .desktop-commit button:not(.desktop-primary) { background: #253545; color: #e9f1f8; border-color: #536578; }
+:root[data-theme="dark"] .desktop-shell .repository-row.selected,
+:root[data-theme="dark"] .desktop-shell .scope-picker-options > button.selected { background: #304f6a; color: #e9f1f8; box-shadow: inset 3px 0 #73b6ff; }
+:root[data-theme="dark"] .desktop-shell button:disabled { background: #26333f; color: #a8b9c8; border-color: #3e5060; }
+:root[data-theme="dark"] .desktop-statusbar { background: #111820; border-color: #344352; color: #b0c0ce; }
+:root[data-theme="dark"] .desktop-statusbar button { color: #b0c0ce; }
+:root[data-theme="dark"] .desktop-statusbar button:hover { background: #293b4e; color: #e9f1f8; }
+:root[data-theme="dark"] .desktop-shell input::placeholder,
+:root[data-theme="dark"] .desktop-shell textarea::placeholder { color: #9daebb; }
+:root[data-theme="dark"] .diff-line.file { background: #253545; border-color: #344352; }
+:root[data-theme="dark"] .desktop-shell :is(.desktop-empty-detail h2, .desktop-start h2, .diff-line code) { color: #e9f1f8; }
+:root[data-theme="dark"] .diff-line .line-number { background: #1e2b36; color: #aebdcc; border-color: #334453; }
+:root[data-theme="dark"] .diff-line.add { background: #163a2d; }
+:root[data-theme="dark"] .diff-line.add .line-number { background: #20503b; color: #a5e9bf; }
+:root[data-theme="dark"] .diff-line.delete { background: #42252c; }
+:root[data-theme="dark"] .diff-line.delete .line-number { background: #5b3038; color: #ffc0c3; }
+:root[data-theme="dark"] .diff-line.hunk { background: #233d57; }
+:root[data-theme="dark"] .diff-line.hunk .line-number { background: #2d4c69; }
+:root[data-theme="dark"] .diff-line.meta,
+:root[data-theme="dark"] .diff-more { background: #1e2b36; }
+@media (prefers-reduced-motion: reduce) { .desktop-shell * { transition-duration: 0s !important; } }
 .account-avatar {
   display: inline-flex;
   align-items: center;
@@ -1494,3 +1665,87 @@
 .desktop-shell .account-popover > button {
   justify-content: flex-start;
 }
+
+/* Shared workspace surfaces. Keep component states in the same palette. */
+:root[data-theme="dark"] .desktop-shell {
+  --pane: #1b2a38;
+  --pane-emphasis: #223445;
+  --canvas: #111c26;
+  --row: #1a2733;
+  --row-hover: #2a4258;
+  --row-selected: #315575;
+  --field: #15222e;
+  --field-border: #587087;
+  --secondary-text: #b9cad9;
+  --soft-border: #334b5e;
+}
+.desktop-shell .repository-popover {
+  background: var(--pane);
+  border-color: var(--field-border);
+}
+.desktop-shell .repository-popover header,
+.desktop-shell .repository-picker-tools,
+.desktop-shell .repository-popover footer {
+  background: var(--pane);
+  border-color: var(--soft-border);
+  color: var(--text);
+}
+.desktop-shell .repository-picker-tools label,
+.desktop-shell .repository-picker-tools input,
+.desktop-shell .repository-picker-tools select,
+.desktop-shell .file-filter,
+.desktop-shell .file-filter input,
+.desktop-shell .scope-picker-trigger {
+  background: var(--field);
+  color: var(--text);
+  border-color: var(--field-border);
+}
+.desktop-shell .repository-picker-tools :is(input, select):focus-visible,
+.desktop-shell .file-filter:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.desktop-shell .repository-picker-list,
+.desktop-shell .repository-popover .repository-row,
+.desktop-shell .scope-picker-options,
+.desktop-shell .scope-picker-options > button {
+  background: var(--row);
+  color: var(--text);
+  border-color: var(--soft-border);
+}
+.desktop-shell .repository-popover .repository-row:hover:not(.selected),
+.desktop-shell .scope-picker-options > button:hover:not([aria-checked="true"]) {
+  background: var(--row-hover);
+  color: var(--text);
+}
+.desktop-shell .repository-popover .repository-row.selected,
+.desktop-shell .scope-picker-options > button[aria-checked="true"] {
+  background: var(--row-selected);
+  color: var(--text);
+  box-shadow: inset 3px 0 var(--accent);
+}
+.desktop-shell .repository-popover .repository-row small,
+.desktop-shell .repository-popover .repository-row.selected small,
+.desktop-shell .scope-picker-options > button > svg { color: var(--secondary-text); }
+.desktop-shell .repository-popover footer button,
+.desktop-shell .repository-popover header button { background: var(--field); color: var(--text); border: 1px solid var(--field-border); }
+.desktop-shell .repository-popover footer button:hover,
+.desktop-shell .repository-popover header button:hover { background: var(--row-hover); }
+.desktop-shell .desktop-tabs,
+.desktop-shell .file-count,
+.desktop-shell .desktop-commit { background: var(--pane); border-color: var(--soft-border); color: var(--text); }
+.desktop-shell .desktop-tabs button { background: var(--pane-emphasis); color: var(--secondary-text); }
+.desktop-shell .desktop-tabs button.active { background: var(--row); color: var(--accent); border-bottom-color: var(--accent); }
+.desktop-shell .desktop-tabs button:hover:not(.active) { background: var(--row-hover); color: var(--text); }
+.desktop-shell .desktop-file-list,
+.desktop-shell .desktop-file-row { background: var(--row); color: var(--text); border-color: var(--soft-border); }
+.desktop-shell .desktop-file-row:hover { background: var(--row-hover); }
+.desktop-shell .desktop-file-row.selected,
+.desktop-shell .desktop-file-row.selected:hover { background: var(--row-selected); box-shadow: inset 3px 0 var(--accent); }
+.desktop-shell .desktop-file-row .file-name,
+.desktop-shell .desktop-file-row .file-name:hover { color: var(--text); }
+.desktop-shell .desktop-commit .commit-identity { background: transparent; color: var(--text); }
+.desktop-shell .desktop-commit .commit-identity:hover { background: var(--row-hover); }
+.desktop-shell .desktop-commit > :is(input, textarea) { background: var(--field); color: var(--text); border-color: var(--field-border); }
+.desktop-shell .desktop-commit :is(.commit-caption, .commit-identity small) { color: var(--secondary-text); }
+:root[data-theme="dark"] .desktop-stage-error { background: #4a2632; color: #ffb8c1; border-color: #754552; }

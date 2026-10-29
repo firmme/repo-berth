@@ -22,6 +22,8 @@ import {
   Activity,
   FileText,
   ArrowLeft,
+  Minus,
+  Square,
 } from "lucide-react";
 import { version } from "../package.json";
 import { api, errorMessage, isDesktop, onStateChanged } from "./api";
@@ -44,8 +46,8 @@ import {
 } from "./components";
 import { ScopePicker } from "./scope-picker";
 import { AccountsView, SettingsView } from "./settings";
-import { BindingModal, CloneForm } from "./repository";
-import { ImportModal, GroupModal, TaskRow } from "./workspace-tools";
+import { BindingModal, CloneForm, CloneURLForm } from "./repository";
+import { ImportModal, TaskRow } from "./workspace-tools";
 import {
   CheckoutIdentity,
   LocalManagement,
@@ -74,7 +76,7 @@ type Panel =
   | "binding"
   | "import"
   | "clone"
-  | "group"
+  | "clone-url"
   | "local-management"
   | "forget"
   | "about";
@@ -83,11 +85,20 @@ export default function Desktop() {
     ui = useUI();
   const [popup, setPopup] = useState<Popup>(""),
     [panel, setPanel] = useState<Panel>("");
+  const customTitlebar = isDesktop && navigator.userAgent.includes("Windows");
+  const windowCommand = (command: "Minimise" | "ToggleMaximise" | "Close") => {
+    void import("@wailsio/runtime").then(({ Window }) => Window[command]());
+  };
   const [copyID, setCopyID] = useState(""),
     [remoteChoices, setRemoteChoices] = useState<Record<string, string>>({});
   const [cloneID, setCloneID] = useState(""),
     [cloneRequest, setCloneRequest] = useState<Task["cloneRequest"]>();
+  const [theme, setTheme] = useState<"system" | "light" | "dark">(() => {
+    const saved = localStorage.getItem("repo-berth-theme");
+    return saved === "light" || saved === "dark" ? saved : "system";
+  });
   const [tab, setTab] = useState<"changes" | "history">("changes");
+  const [showCompletedTasks, setShowCompletedTasks] = useState(false);
   const [error, setError] = useState(""),
     [pending, setPending] = useState(false),
     [repositorySearch, setRepositorySearch] = useState("");
@@ -171,6 +182,14 @@ export default function Desktop() {
       await client.invalidateQueries({ queryKey: ["git"] });
     }
   };
+  useEffect(() => {
+    const media = window.matchMedia?.("(prefers-color-scheme: dark)");
+    const apply = () => { document.documentElement.dataset.theme = theme === "system" ? (media?.matches ? "dark" : "light") : theme; };
+    apply();
+    media?.addEventListener("change", apply);
+    localStorage.setItem("repo-berth-theme", theme);
+    return () => media?.removeEventListener("change", apply);
+  }, [theme]);
   useEffect(() => {
     let off = () => {};
     let live = true;
@@ -307,10 +326,7 @@ export default function Desktop() {
       { label: "管理本地目录…", action: () => show("local-management") },
       {
         label: "克隆仓库…",
-        action: () => {
-          setPopup("repositories");
-          setRepositorySearch("");
-        },
+        action: () => { setCloneRequest(undefined); show("clone-url"); },
       },
       { label: "设置…", action: () => show("settings") },
     ],
@@ -358,6 +374,9 @@ export default function Desktop() {
           setPopup("");
         },
       },
+      { label: `跟随系统主题${theme === "system" ? "（当前）" : ""}`, action: () => setTheme("system") },
+      { label: `日间主题${theme === "light" ? "（当前）" : ""}`, action: () => setTheme("light") },
+      { label: `暗黑主题${theme === "dark" ? "（当前）" : ""}`, action: () => setTheme("dark") },
     ],
     repository: [
       {
@@ -470,7 +489,7 @@ export default function Desktop() {
     </div>
   );
   return (
-    <div className="desktop-shell">
+    <div className={`desktop-shell${customTitlebar ? " custom-titlebar" : ""}`}>
       <nav className="desktop-menubar" aria-label="应用菜单">
         <img src="/app-icon.svg" alt="" width="17" height="17" />
         <span className="desktop-app-name">Repo Berth</span>
@@ -482,7 +501,9 @@ export default function Desktop() {
           ["branch", "分支"],
           ["help", "帮助"],
         ].map(([id, label]) => (
-          <div data-desktop-popup key={id}>
+          <div data-desktop-popup key={id} onMouseEnter={() => {
+            if (["file", "edit", "view", "repository", "branch", "help"].includes(popup)) setPopup(id as Popup);
+          }}>
             {popupButton(id as Popup, label)}
             {popup === id &&
               (id === "branch" ? (
@@ -505,6 +526,16 @@ export default function Desktop() {
               ))}
           </div>
         ))}
+        {customTitlebar && (
+          <>
+            <span className="desktop-title-drag" aria-hidden="true" />
+            <div className="desktop-window-controls">
+              <button type="button" aria-label="最小化" title="最小化" onClick={() => windowCommand("Minimise")}><Minus size={16} /></button>
+              <button type="button" aria-label="最大化或还原" title="最大化或还原" onClick={() => windowCommand("ToggleMaximise")}><Square size={13} /></button>
+              <button type="button" aria-label="关闭窗口" title="关闭" onClick={() => windowCommand("Close")}><X size={17} /></button>
+            </div>
+          </>
+        )}
       </nav>
       <header className="desktop-toolbar">
         <div className="toolbar-unit repository-unit" data-desktop-popup>
@@ -630,10 +661,7 @@ export default function Desktop() {
                   <span>
                     <strong>{a.login}</strong>
                     <small>
-                      {a.note ||
-                        (a.status === "auth_required"
-                          ? "需要重新授权"
-                          : "GitHub")}
+                      {a.status === "auth_required" ? "需要重新授权" : "GitHub"}
                       {a.id === st.settings.defaultAccountId ? " · 默认" : ""}
                     </small>
                   </span>
@@ -736,9 +764,6 @@ export default function Desktop() {
             )}
           </div>
           <footer>
-            <button onClick={() => show("local-management")}>
-              管理本地目录…
-            </button>
             <button onClick={() => show("import")}>
               <FolderOpen size={14} />
               添加本地仓库
@@ -796,7 +821,6 @@ export default function Desktop() {
             {checkout.name} <small>普通目录 · 非 Git 仓库</small>
           </h1>
           <p className="path-text">{checkout.path}</p>
-          <p>此目录仅作为本地目录管理，尚未初始化 Git。</p>
           <div className="form-actions">
             <button
               onClick={() =>
@@ -833,7 +857,6 @@ export default function Desktop() {
           verifying={verifying}
           remote={remote}
           accountID={account?.id || ""}
-          profileID={profile?.id || ""}
           busy={busy}
           tab={tab}
           setTab={setTab}
@@ -862,26 +885,22 @@ export default function Desktop() {
             <div className="desktop-start">
               <FolderGit2 size={42} strokeWidth={1.2} />
               <h2>开始管理你的仓库</h2>
-              <p>添加本地仓库，或使用 GitHub 账号克隆一个仓库。</p>
               <div className="desktop-next-actions">
                 <ActionRow
                   title="添加已有的本地仓库"
-                  detail="文件和 Git 配置保持不变"
                   action="选择本地目录"
                   onClick={() => show("import")}
                 />
                 <ActionRow
                   title="从 GitHub 克隆仓库"
-                  detail="连接个人和工作账号，分别使用各自权限"
-                  action={
-                    st.accounts.length ? "选择云端仓库" : "添加 GitHub 账号"
-                  }
-                  onClick={() =>
-                    st.accounts.length
-                      ? setPopup("repositories")
-                      : show("accounts")
-                  }
+                  action="填写仓库地址"
+                  onClick={() => { setCloneRequest(undefined); show("clone-url"); }}
                 />
+                {!st.accounts.length && <ActionRow
+                  title="连接 GitHub 账号"
+                  action="添加 GitHub 账号"
+                  onClick={() => show("accounts")}
+                />}
               </div>
               {!isDesktop && (
                 <p className="desktop-preview">
@@ -916,7 +935,7 @@ export default function Desktop() {
       {ui.tasksOpen && (
         <aside className="task-drawer desktop-tasks" aria-label="任务中心">
           <header>
-            <h2>任务中心</h2>
+            <h2>任务进度</h2>
             <button
               aria-label="关闭任务中心"
               onClick={() => ui.set({ tasksOpen: false })}
@@ -924,24 +943,28 @@ export default function Desktop() {
               <X size={18} />
             </button>
           </header>
+          {st.tasks.some((t) => t.state === "succeeded") && <button className="text-button" onClick={() => setShowCompletedTasks((v) => !v)}>{showCompletedTasks ? "隐藏已完成" : "查看已完成"}</button>}
           <div className="task-list">
-            {st.tasks.length ? (
-              st.tasks.map((t) => (
+            {st.tasks.some((t) => showCompletedTasks || t.state !== "succeeded") ? (
+              st.tasks.filter((t) => showCompletedTasks || t.state !== "succeeded").map((t) => (
                 <TaskRow
                   key={t.id}
                   task={t}
                   st={st}
                   execute={execute}
                   onClone={() => {
-                    const row = rows.find((r) => r.id === t.target);
-                    if (row) clone(row, t.cloneRequest);
+                    if (t.cloneRequest?.url) { setCloneRequest(t.cloneRequest); show("clone-url"); }
+                    else {
+                      const row = rows.find((r) => r.id === t.target);
+                      if (row) clone(row, t.cloneRequest);
+                    }
                   }}
                   onOpenCheckout={() => openTarget(t.target)}
                 />
               ))
             ) : (
               <p className="desktop-list-empty">
-                没有任务。授权、同步和 Git 操作会显示在这里。
+                当前没有进行中或失败的任务。
               </p>
             )}
           </div>
@@ -996,6 +1019,16 @@ export default function Desktop() {
           />
         </Modal>
       )}
+      {panel === "clone-url" && (
+        <Modal title="克隆 GitHub 仓库" onClose={closePanel}>
+          <CloneURLForm
+            key={cloneRequest?.destination || "new"}
+            st={st} execute={execute} initial={cloneRequest}
+            preferredAccountID={ui.scope.startsWith("account:") ? ui.scope.slice(8) : account?.id}
+            onDone={() => { closePanel(); ui.set({ tasksOpen: true }); }}
+          />
+        </Modal>
+      )}
       {panel === "binding" && checkout && remote && (
         <BindingModal
           key={checkout.id + remote + account?.id}
@@ -1007,9 +1040,6 @@ export default function Desktop() {
           initialAccountID={account?.id}
           onClose={closePanel}
         />
-      )}
-      {panel === "group" && (
-        <GroupModal execute={execute} onClose={closePanel} />
       )}
       {panel === "repository" && checkout && (
         <Modal title="仓库设置" onClose={closePanel}>
@@ -1050,7 +1080,7 @@ export default function Desktop() {
                   <br />
                   提交身份：
                   {(() => {
-                    const p = effectiveCommitIdentity(st, checkout, profile);
+                    const p = effectiveCommitIdentity(st, checkout, profile, !!account);
                     return p ? `${p.name} <${p.email}>` : "未确认";
                   })()}
                 </p>
@@ -1078,27 +1108,6 @@ export default function Desktop() {
                 </button>
               )}
             </div>
-            <h3>分组</h3>
-            {st.groups.map((g) => (
-              <label className="checkbox-label" key={g.id}>
-                <input
-                  type="checkbox"
-                  checked={g.members.includes(selected!.id)}
-                  onChange={(e) =>
-                    void execute(() =>
-                      api("SaveGroup", {
-                        ...g,
-                        members: e.target.checked
-                          ? [...new Set([...g.members, selected!.id])]
-                          : g.members.filter((id) => id !== selected!.id),
-                      }),
-                    )
-                  }
-                />
-                {g.name}
-              </label>
-            ))}
-            <button onClick={() => show("group")}>新建分组</button>
             <hr />
             <button disabled={busy} onClick={() => show("forget")}>
               将此副本移出管理…
@@ -1137,23 +1146,15 @@ export default function Desktop() {
 
 function ActionRow({
   title,
-  detail,
   action,
   onClick,
 }: {
   title: string;
-  detail: string;
   action: string;
   onClick: () => void;
 }) {
   return (
-    <div className="desktop-action-row">
-      <div>
-        <strong>{title}</strong>
-        <p>{detail}</p>
-      </div>
-      <button onClick={onClick}>{action}</button>
-    </div>
+    <button className="desktop-action-row" title={title} onClick={onClick}>{action}</button>
   );
 }
 
@@ -1166,7 +1167,6 @@ function Worktree({
   verifying,
   remote,
   accountID,
-  profileID,
   busy,
   tab,
   setTab,
@@ -1183,7 +1183,6 @@ function Worktree({
   verifying: boolean;
   remote: string;
   accountID: string;
-  profileID: string;
   busy: boolean;
   tab: "changes" | "history";
   setTab: (tab: "changes" | "history") => void;
@@ -1192,10 +1191,16 @@ function Worktree({
   accountSettings: () => void;
   openRepository: () => void;
 }) {
+  const client = useQueryClient();
   const [filter, setFilter] = useState(""),
     [selected, setSelected] = useState<{ path: string; staged: boolean }>(),
     [commitHash, setCommitHash] = useState(""),
-    [sending, setSending] = useState(false);
+    [historyFile, setHistoryFile] = useState(""),
+    [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set()),
+    [sending, setSending] = useState(false),
+    [stageOverrides, setStageOverrides] = useState<Record<string, boolean>>({}),
+    [stagingPaths, setStagingPaths] = useState<Set<string>>(new Set()),
+    [stageError, setStageError] = useState("");
   const draft = useUI((s) => s.commitDrafts[c.id] || ""),
     submission = useUI((s) => s.commitSubmissions[c.id]);
   const split = draft.indexOf("\n");
@@ -1206,6 +1211,25 @@ function Worktree({
     useUI.getState().setCommitDraft(c.id, title + (body ? "\n\n" + body : ""));
   const files = status?.files || [];
   const staged = files.filter(hasStaged);
+  const fullyStaged = (f: FileStatus) => stageOverrides[f.path] ?? (hasStaged(f) && !hasUnstaged(f));
+  const stageFiles = async (targets: FileStatus[], next: boolean) => {
+    if (!targets.length) return;
+    setStageError("");
+    setStageOverrides((old) => Object.fromEntries([...Object.entries(old), ...targets.map((f) => [f.path, next])]));
+    setStagingPaths((old) => new Set([...old, ...targets.map((f) => f.path)]));
+    try {
+      if (targets.length === 1) await api("StageFile", c.id, targets[0].path, next);
+      else await api("StageFiles", c.id, targets.map((f) => f.path), next);
+      await client.invalidateQueries({ queryKey: ["git", "status", c.id] });
+      await client.invalidateQueries({ queryKey: ["git", "diff", c.id] });
+    } catch (e) {
+      setStageError(errorMessage(e));
+      await client.invalidateQueries({ queryKey: ["git", "status", c.id] });
+    } finally {
+      setStageOverrides((old) => { const nextValues = { ...old }; for (const f of targets) delete nextValues[f.path]; return nextValues; });
+      setStagingPaths((old) => { const nextValues = new Set(old); for (const f of targets) nextValues.delete(f.path); return nextValues; });
+    }
+  };
   const filtered = files.filter((f) =>
     f.path.toLowerCase().includes(filter.toLowerCase()),
   );
@@ -1234,11 +1258,22 @@ function Worktree({
     queryFn: () => api("GitCommitDiff", c.id, commit!.hash),
     enabled: tab === "history" && !!commit,
   });
+  const historyFiles = useMemo(() => {
+    const chunks = (commitDiff.data || "").split(/(?=^diff --git )/m).filter((chunk) => chunk.startsWith("diff --git "));
+    return chunks.map((diff) => ({
+      path: (() => {
+        const header = /^diff --git (?:"a\/.*" "b\/([^"]+)"|a\/.* b\/(.*))$/m.exec(diff);
+        return header?.[1] || header?.[2] || "未知文件";
+      })(),
+      diff,
+    })).sort((a, b) => a.path.localeCompare(b.path));
+  }, [commitDiff.data]);
   const account = st.accounts.find((a) => a.id === accountID),
     profile = effectiveCommitIdentity(
       st,
       c,
-      st.profiles.find((p) => p.id === profileID),
+      st.profiles.find((p) => p.accountId === accountID),
+      !!accountID,
     );
   const authorAccounts = new Set(
     st.profiles
@@ -1252,10 +1287,7 @@ function Worktree({
         ? [...authorAccounts][0]
         : "";
   const authorAccount = st.accounts.find((a) => a.id === authorAccountID);
-  const stage = (f: FileStatus) =>
-    void execute(() =>
-      api("StageFile", c.id, f.path, hasUnstaged(f) || !hasStaged(f)),
-    );
+  const stage = (f: FileStatus) => void stageFiles([f], !fullyStaged(f));
   return (
     <div
       className={`desktop-workspace ${activeFile || commit ? "has-file" : ""} ${tab === "changes" && status && files.length === 0 ? "clean-state" : ""}`}
@@ -1294,36 +1326,33 @@ function Worktree({
               <input
                 type="checkbox"
                 aria-label="将全部变更加入提交"
-                disabled={busy || verifying || !files.length}
+                disabled={busy || !!statusError || !status || stagingPaths.size > 0 || !files.length}
                 checked={
                   !!files.length &&
-                  files.every((f) => hasStaged(f) && !hasUnstaged(f))
+                  files.every(fullyStaged)
                 }
                 onChange={(e) => {
-                  const stage = e.target.checked;
-                  void execute(async () => {
-                    for (const f of files)
-                      await api("StageFile", c.id, f.path, stage);
-                  });
+                  void stageFiles(files, e.target.checked);
                 }}
               />
               <span>
                 {status ? `${files.length} 个变更文件` : "正在读取变更…"}
               </span>
             </div>
+            {stageError && <div className="desktop-stage-error" role="alert">{stageError}</div>}
             <div className="desktop-file-list">
               {filtered.map((f) => (
                 <div
                   className={`desktop-file-row ${file?.path === f.path ? "selected" : ""}`}
                   key={f.path}
                 >
-                  <input
-                    aria-label={`${hasStaged(f) && !hasUnstaged(f) ? "取消暂存" : "暂存"} ${f.path}`}
+                  <label className="file-stage-toggle" title={fullyStaged(f) ? `取消暂存 ${f.path}` : `暂存 ${f.path}`}><input
+                    aria-label={`${fullyStaged(f) ? "取消暂存" : "暂存"} ${f.path}`}
                     type="checkbox"
-                    checked={hasStaged(f) && !hasUnstaged(f)}
-                    disabled={busy || verifying}
+                    checked={fullyStaged(f)}
+                    disabled={busy || !!statusError || !status || stagingPaths.has(f.path)}
                     onChange={() => stage(f)}
-                  />
+                  /></label>
                   <button
                     title={f.path}
                     className="file-name"
@@ -1428,6 +1457,7 @@ function Worktree({
                   busy ||
                   sending ||
                   !!submission ||
+                  stagingPaths.size > 0 ||
                   verifying ||
                   !staged.length ||
                   !summary.trim() ||
@@ -1449,14 +1479,13 @@ function Worktree({
                 <button
                   className={commit?.hash === item.hash ? "selected" : ""}
                   key={item.hash}
-                  onClick={() => setCommitHash(item.hash)}
+                  onClick={() => { setCommitHash(item.hash); setHistoryFile(""); setCollapsedFolders(new Set()); }}
                 >
                   <GitCommitHorizontal size={16} />
                   <span>
                     <strong>{item.subject}</strong>
                     <small>
-                      {item.author} ·{" "}
-                      {new Date(item.date).toLocaleDateString("zh-CN")}
+                      {item.author} · <RelativeTime date={item.date} />
                     </small>
                   </span>
                 </button>
@@ -1489,7 +1518,29 @@ function Worktree({
               ) : commitDiff.isError ? (
                 <ErrorNotice message={errorMessage(commitDiff.error)} />
               ) : (
-                <DiffViewer text={commitDiff.data || ""} />
+                <div className="desktop-history-content">
+                  <nav className="desktop-history-tree" aria-label="提交文件树">
+                    <div className="history-tree-heading">文件变更 <span>{historyFiles.length}</span></div>
+                    <button className={!historyFile ? "selected" : ""} onClick={() => setHistoryFile("")}>全部文件</button>
+                    {historyFiles.flatMap(({ path }, index) => {
+                      const parts = path.split("/");
+                      const folders = parts.slice(0, -1);
+                      const visible = folders.every((_, level) => !collapsedFolders.has(folders.slice(0, level + 1).join("/")));
+                      const previous = historyFiles[index - 1]?.path.split("/") || [];
+                      const folderRows = folders.flatMap((name, level) => {
+                        const folderPath = folders.slice(0, level + 1).join("/");
+                        if (previous.slice(0, level + 1).join("/") === folderPath || folders.slice(0, level).some((_, parent) => collapsedFolders.has(folders.slice(0, parent + 1).join("/")))) return [];
+                        return <button key={`folder:${folderPath}`} className="history-folder" style={{ paddingLeft: 10 + level * 13 }} aria-expanded={!collapsedFolders.has(folderPath)} onClick={() => setCollapsedFolders((old) => { const next = new Set(old); if (next.has(folderPath)) next.delete(folderPath); else next.add(folderPath); return next; })}>
+                          <ChevronDown size={13} className={collapsedFolders.has(folderPath) ? "collapsed" : ""} /><span>{name}</span>
+                        </button>;
+                      });
+                      return [...folderRows, ...(visible ? [<button key={`file:${path}`} className={historyFile === path ? "selected" : ""} style={{ paddingLeft: 10 + folders.length * 13 }} title={path} onClick={() => setHistoryFile(path)}>
+                        <FileText size={14} /><span>{parts.at(-1)}</span>
+                      </button>] : [])];
+                    })}
+                  </nav>
+                  <DiffViewer key={commit.hash + historyFile} text={historyFile ? historyFiles.find((f) => f.path === historyFile)?.diff || "" : commitDiff.data || ""} />
+                </div>
               )}
             </>
           ) : (
@@ -1544,15 +1595,11 @@ function Worktree({
                   ? "查看你的修改"
                   : "没有本地变更"}
             </h2>
-            <p>
-              {files.length
-                ? "在左侧选择文件查看差异，勾选要提交的文件。"
-                : "当前工作区没有未提交的修改，可以从下面继续。"}
-            </p>
+            <p className="desktop-checkout-path">{c.path}</p>
+            {files.length > 0 && <p>选择左侧文件查看差异。</p>}
             <div className="desktop-next-actions">
               <ActionRow
                 title="在外部编辑器中打开仓库"
-                detail={c.path}
                 action="打开编辑器"
                 onClick={() =>
                   void execute(() => api("OpenCheckout", c.id, "editor"))
@@ -1560,7 +1607,6 @@ function Worktree({
               />
               <ActionRow
                 title="在文件夹中查看仓库"
-                detail="使用系统文件管理器浏览本地文件"
                 action="打开文件夹"
                 onClick={() =>
                   void execute(() => api("OpenCheckout", c.id, "folder"))
@@ -1569,7 +1615,6 @@ function Worktree({
               {row.repository && (
                 <ActionRow
                   title="在 GitHub 中查看仓库"
-                  detail={`${row.owner}/${row.name}`}
                   action="查看 GitHub"
                   onClick={openRepository}
                 />
@@ -1599,6 +1644,16 @@ function Worktree({
 }
 function hasStaged(f: FileStatus) {
   return f.index !== " " && f.index !== "?";
+}
+function RelativeTime({ date }: { date: string }) {
+  const value = new Date(date);
+  if (Number.isNaN(value.getTime())) return <>{date}</>;
+  const seconds = Math.max(0, Math.floor((Date.now() - value.getTime()) / 1000));
+  if (seconds < 60) return <>刚刚</>;
+  if (seconds < 3600) return <>{Math.floor(seconds / 60)} 分钟前</>;
+  if (seconds < 86400) return <>{Math.floor(seconds / 3600)} 小时前</>;
+  if (seconds < 7 * 86400) return <>{Math.floor(seconds / 86400)} 天前</>;
+  return <>{value.toLocaleDateString("zh-CN")}</>;
 }
 function hasUnstaged(f: FileStatus) {
   return f.worktree !== " " || f.index === "?";

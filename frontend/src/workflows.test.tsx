@@ -172,12 +172,7 @@ describe("identity maintenance", () => {
     const save = within(dialog).getByRole("button", {
       name: "保存身份",
     }) as HTMLButtonElement;
-    expect(save.disabled).toBe(true);
-    await user.click(
-      within(dialog).getByRole("checkbox", {
-        name: "我已确认此姓名和邮箱用于 Git 提交",
-      }),
-    );
+    expect(save.disabled).toBe(false);
     await user.click(save);
     await waitFor(() =>
       expect(mocks.api).toHaveBeenCalledWith("SaveProfile", {
@@ -188,29 +183,22 @@ describe("identity maintenance", () => {
       }),
     );
   });
-  it("does not delete an identity still bound to a checkout", async () => {
+  it("does not offer deletion of the account's only identity", async () => {
     const user = userEvent.setup();
     mount(<AccountsView st={fixture()} execute={execute} />);
     await user.click(screen.getByRole("button", { name: "编辑" }));
-    const remove = screen.getByRole("button", {
-      name: /删除身份/,
-    }) as HTMLButtonElement;
-    expect(remove.disabled).toBe(true);
-    await user.click(remove);
+    expect(screen.queryByRole("button", { name: /删除身份/ })).toBeNull();
     expect(
       mocks.api.mock.calls.some(([name]) => name === "DeleteProfile"),
     ).toBe(false);
   });
-  it("can remove an unused identity without removing its account", async () => {
+  it("keeps one identity even when no checkout uses it", async () => {
     const state = fixture();
     state.bindings = [];
     const user = userEvent.setup();
     mount(<AccountsView st={state} execute={execute} />);
     await user.click(screen.getByRole("button", { name: "编辑" }));
-    await user.click(screen.getByRole("button", { name: "删除身份" }));
-    await waitFor(() =>
-      expect(mocks.api).toHaveBeenCalledWith("DeleteProfile", "profile"),
-    );
+    expect(screen.queryByRole("button", { name: "删除身份" })).toBeNull();
     expect(
       mocks.api.mock.calls.some(([name]) => name === "RemoveAccount"),
     ).toBe(false);
@@ -883,9 +871,7 @@ describe("clone retry confirmation", () => {
     expect((screen.getByLabelText("访问账号") as HTMLSelectElement).value).toBe(
       "work",
     );
-    expect((screen.getByLabelText("提交身份") as HTMLSelectElement).value).toBe(
-      "work-profile",
-    );
+    expect(screen.getByText(/提交信息：Work Name/)).toBeTruthy();
   });
   it("requires an explicit account choice if the filtered account has no cloud access record", () => {
     const state = cloneState();
@@ -923,9 +909,7 @@ describe("clone retry confirmation", () => {
     expect((screen.getByLabelText("访问账号") as HTMLSelectElement).value).toBe(
       "work",
     );
-    expect((screen.getByLabelText("提交身份") as HTMLSelectElement).value).toBe(
-      "work-profile",
-    );
+    expect(screen.getByText(/提交信息：Work Name/)).toBeTruthy();
     expect(
       (screen.getByLabelText("克隆父目录") as HTMLInputElement).value,
     ).toBe("D:\\工作目录");
@@ -945,7 +929,7 @@ describe("clone retry confirmation", () => {
       "D:\\工作目录/chosen checkout",
     );
   });
-  it("requires a new selection when the saved profile was removed", async () => {
+  it("uses the account's current identity when a previous profile was removed", async () => {
     const state = cloneState();
     state.profiles = state.profiles.filter((p) => p.id !== "work-profile");
     state.profiles.push({
@@ -954,7 +938,6 @@ describe("clone retry confirmation", () => {
       name: "Other",
       email: "other@example.test",
     });
-    const user = userEvent.setup();
     mount(
       <CloneForm
         repository={state.repositories[0]}
@@ -964,14 +947,7 @@ describe("clone retry confirmation", () => {
         initial={request}
       />,
     );
-    expect((screen.getByLabelText("提交身份") as HTMLSelectElement).value).toBe(
-      "",
-    );
-    expect(
-      (screen.getByRole("button", { name: "开始克隆" }) as HTMLButtonElement)
-        .disabled,
-    ).toBe(true);
-    await user.selectOptions(screen.getByLabelText("提交身份"), "replacement");
+    expect(screen.getByText(/提交信息：Other/)).toBeTruthy();
     expect(
       (screen.getByRole("button", { name: "开始克隆" }) as HTMLButtonElement)
         .disabled,
@@ -1031,6 +1007,56 @@ describe("clone retry confirmation", () => {
     expect(
       (within(dialog).getByLabelText("新建目录名称") as HTMLInputElement).value,
     ).toBe("chosen checkout");
+  });
+});
+
+describe("desktop staging feedback", () => {
+  it("checks a file immediately while the Git write is pending", async () => {
+    const state = fixture();
+    const files = ["one.txt", "two.txt"].map((path) => ({ path, originalPath: "", index: " ", worktree: "M" }));
+    let finish = () => {};
+    const gate = new Promise<void>((resolve) => { finish = resolve; });
+    mocks.api.mockImplementation(async (name: string) => {
+      if (name === "Snapshot") return state;
+      if (name === "GitVersion") return "git version 2.49.0";
+      if (name === "GitStatus") return { branch: "main", upstream: "", ahead: 0, behind: 0, detached: false, files, remotes: [{ name: "origin", url: "https://github.com/org/project.git", pushUrl: "" }] };
+      if (name === "StageFile") { await gate; files[0].index = "M"; files[0].worktree = " "; }
+      return undefined;
+    });
+    const user = userEvent.setup();
+    mount(<App />);
+    await user.click(await screen.findByRole("button", { name: /当前仓库/ }));
+    await user.click(await screen.findByRole("button", { name: /D:\/Projects\/local-project/ }));
+    const first = await screen.findByRole("checkbox", { name: "暂存 one.txt" });
+    await user.click(first);
+    expect(mocks.api).toHaveBeenCalledWith("StageFile", "checkout", "one.txt", true);
+    expect((screen.getByRole("checkbox", { name: "取消暂存 one.txt" }) as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByRole("checkbox", { name: "暂存 two.txt" }) as HTMLInputElement).disabled).toBe(false);
+    finish();
+    await waitFor(() => expect((screen.getByRole("checkbox", { name: "取消暂存 one.txt" }) as HTMLInputElement).disabled).toBe(false));
+  });
+  it("stages all files in one request and updates the checkboxes before it finishes", async () => {
+    const state = fixture();
+    const files = ["one.txt", "two.txt"].map((path) => ({ path, originalPath: "", index: " ", worktree: "M" }));
+    let finish = () => {};
+    const gate = new Promise<void>((resolve) => { finish = resolve; });
+    mocks.api.mockImplementation(async (name: string) => {
+      if (name === "Snapshot") return state;
+      if (name === "GitVersion") return "git version 2.49.0";
+      if (name === "GitStatus") return { branch: "main", upstream: "", ahead: 0, behind: 0, detached: false, files, remotes: [{ name: "origin", url: "https://github.com/org/project.git", pushUrl: "" }] };
+      if (name === "StageFiles") { await gate; for (const f of files) { f.index = "M"; f.worktree = " "; } }
+      return undefined;
+    });
+    const user = userEvent.setup();
+    mount(<App />);
+    await user.click(await screen.findByRole("button", { name: /当前仓库/ }));
+    await user.click(await screen.findByRole("button", { name: /D:\/Projects\/local-project/ }));
+    await user.click(await screen.findByRole("checkbox", { name: "将全部变更加入提交" }));
+    expect(mocks.api).toHaveBeenCalledWith("StageFiles", "checkout", ["one.txt", "two.txt"], true);
+    expect((screen.getByRole("checkbox", { name: "取消暂存 one.txt" }) as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByRole("checkbox", { name: "取消暂存 two.txt" }) as HTMLInputElement).checked).toBe(true);
+    finish();
+    await waitFor(() => expect((screen.getByRole("checkbox", { name: "将全部变更加入提交" }) as HTMLInputElement).disabled).toBe(false));
   });
 });
 describe("first launch", () => {

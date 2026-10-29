@@ -70,7 +70,6 @@ export function CloneForm({
       accounts[0]?.id ??
       "",
   );
-  const [profileID, setProfileID] = useState(initial?.profileId ?? "");
   const [parent, setParent] = useState(
     destination
       ? destination.slice(0, separator) || "/"
@@ -80,10 +79,7 @@ export function CloneForm({
     destination ? destination.slice(separator + 1) : r.name,
   );
   const [busy, setBusy] = useState(false);
-  const profiles = st.profiles.filter((p) => p.accountId === accountID);
-  const profile = profileID
-    ? profiles.find((p) => p.id === profileID)
-    : profiles[0];
+  const profile = st.profiles.find((p) => p.accountId === accountID);
   const account = accounts.find((a) => a.id === accountID);
   return (
     <form
@@ -112,7 +108,7 @@ export function CloneForm({
       </p>
       {initial && (
         <p className="empty-note">
-          已恢复上次克隆的账号、提交身份和目标目录。请确认后重新开始；不会覆盖已有目录。
+          已恢复上次克隆的账号和目标目录。将使用该账号当前的提交信息；请确认后重新开始，不会覆盖已有目录。
         </p>
       )}
       {!initial && preferredAccountID && !account && (
@@ -125,7 +121,6 @@ export function CloneForm({
           value={account?.id || ""}
           onChange={(e) => {
             setAccountID(e.target.value);
-            setProfileID("");
           }}
         >
           <option value="" disabled>
@@ -134,26 +129,11 @@ export function CloneForm({
           {accounts.map((a) => (
             <option key={a.id} value={a.id}>
               {a.login}
-              {a.note ? ` · ${a.note}` : ""}
             </option>
           ))}
         </select>
       </Field>
-      <Field label="提交身份">
-        <select
-          value={profile?.id || ""}
-          onChange={(e) => setProfileID(e.target.value)}
-        >
-          <option value="" disabled>
-            请先在账号与身份中确认提交身份
-          </option>
-          {profiles.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.name} &lt;{p.email}&gt;
-            </option>
-          ))}
-        </select>
-      </Field>
+      {account && <p className="subtle-note">提交信息：{profile ? `${profile.name} <${profile.email}>` : "请先在账号与身份中设置"}</p>}
       <DirectoryField label="克隆父目录" value={parent} onChange={setParent} />
       <Field label="新建目录名称">
         <input
@@ -174,6 +154,53 @@ export function CloneForm({
       </div>
     </form>
   );
+}
+
+export function CloneURLForm({
+  st, execute, onDone, initial, preferredAccountID,
+}: {
+  st: State;
+  execute: Execute;
+  onDone: () => void;
+  initial?: Task["cloneRequest"];
+  preferredAccountID?: string;
+}) {
+  const destination = initial?.destination || "";
+  const separator = Math.max(destination.lastIndexOf("/"), destination.lastIndexOf("\\"));
+  const [url, setURL] = useState(initial?.url || "");
+  const [accountID, setAccountID] = useState(initial?.accountId ?? preferredAccountID ?? "");
+  const [parent, setParent] = useState(destination ? destination.slice(0, separator) || "/" : st.settings.cloneDirectory);
+  const [folder, setFolder] = useState(destination ? destination.slice(separator + 1) : "");
+  const [busy, setBusy] = useState(false);
+  const profile = st.profiles.find((p) => p.accountId === accountID);
+  const validURL = /^https:\/\/github\.com\/[^/\s?#]+\/[^/\s?#]+(?:\.git)?\/?$/i.test(url.trim());
+  return <form onSubmit={(e) => {
+    e.preventDefault();
+    void execute(async () => {
+      setBusy(true);
+      try {
+        await api("CloneFromURL", url.trim(), accountID, profile?.id || "", `${parent.replace(/[\\/]$/, "")}/${folder.trim()}`);
+        onDone();
+      } finally { setBusy(false); }
+    });
+  }}>
+    <p className="subtle-note">公开仓库可直接克隆；私有仓库请选择有权限的 GitHub 账号。</p>
+    {initial && <p className="empty-note">已恢复上次的账号和目标目录。将使用该账号当前的提交信息，请确认后重试。</p>}
+    <Field label="仓库地址"><input required autoFocus type="url" value={url} placeholder="https://github.com/owner/repository.git" onChange={(e) => {
+      const value = e.target.value;
+      setURL(value);
+      const name = value.trim().split("/").filter(Boolean).at(-1)?.replace(/\.git$/i, "") || "";
+      if (!initial) setFolder(name);
+    }} /></Field>
+    <Field label="访问账号"><select value={accountID} onChange={(e) => setAccountID(e.target.value)}>
+      <option value="">不使用账号（公开仓库）</option>
+      {st.accounts.map((a) => <option key={a.id} value={a.id}>{a.login}</option>)}
+    </select></Field>
+    {accountID && <p className="subtle-note">提交信息：{profile ? `${profile.name} <${profile.email}>` : "请先在账号与身份中设置"}</p>}
+    <DirectoryField label="克隆父目录" value={parent} onChange={setParent} />
+    <Field label="新建目录名称"><input required pattern="[^/\\]+" value={folder} onChange={(e) => setFolder(e.target.value)} /></Field>
+    <div className="form-actions"><button className="primary" disabled={busy || !validURL || (!!accountID && !profile) || !parent || !folder.trim()}>克隆仓库</button></div>
+  </form>;
 }
 export function RepositoryDetail({
   row,
@@ -696,7 +723,6 @@ export function BindingModal({
             {st.accounts.map((a) => (
               <option key={a.id} value={a.id}>
                 {a.login}
-                {a.note ? ` · ${a.note}` : ""}
               </option>
             ))}
           </select>

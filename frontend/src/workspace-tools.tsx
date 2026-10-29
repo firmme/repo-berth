@@ -201,8 +201,9 @@ export function TaskRow({
       {t.cloneRequest && (
         <p className="task-context">
           访问账号：
-          {st.accounts.find((a) => a.id === t.cloneRequest!.accountId)?.login ||
-            "原账号已移除"}
+            {t.cloneRequest.accountId
+              ? st.accounts.find((a) => a.id === t.cloneRequest!.accountId)?.login || "原账号已移除"
+              : "未使用账号（公开仓库）"}
           <br />
           目标目录：{t.cloneRequest.destination}
         </p>
@@ -241,8 +242,8 @@ export function TaskRow({
           )}
         </details>
       )}
-      <details className="task-logs">
-        <summary>脱敏日志</summary>
+      {t.state !== "succeeded" && <details className="task-logs">
+        <summary>详细记录</summary>
         <pre>
           {t.logs
             ?.map(
@@ -253,7 +254,7 @@ export function TaskRow({
             t.error ||
             stateNames[t.state]}
         </pre>
-      </details>
+      </details>}
       <div className="task-row-footer">
         <time>{new Date(t.startedAt).toLocaleTimeString("zh-CN")}</time>
         {st.checkouts.some((c) => c.id === t.target) && (

@@ -5,16 +5,12 @@ import (
 )
 
 func profileForAccount(st *model.State, id string) string {
-	result := ""
 	for _, p := range st.Profiles {
 		if p.AccountID == id {
-			if result != "" {
-				return ""
-			}
-			result = p.ID
+			return p.ID
 		}
 	}
-	return result
+	return ""
 }
 func hasAccount(st *model.State, id string) bool {
 	for _, a := range st.Accounts {
@@ -112,7 +108,7 @@ func accessBinding(st *model.State, id, remote string) (model.RepositoryBinding,
 		return selected, model.CommitProfile{}, model.Err("BINDING_REQUIRED", "请选择访问账号；仓库没有关联时使用上次选择的默认账号")
 	}
 	for _, p := range st.Profiles {
-		if p.ID == selected.ProfileID {
+		if p.ID == profileForAccount(st, selected.AccountID) {
 			return selected, p, nil
 		}
 	}
@@ -170,9 +166,6 @@ func (s *Service) SetAccessAccount(checkoutID, remote, accountID string) error {
 		st.Settings.DefaultAccountID = accountID
 		for i, b := range st.Bindings {
 			if b.CheckoutID == checkoutID && b.Remote == remote {
-				if b.ProfileID != "" {
-					binding.ProfileID = b.ProfileID
-				}
 				st.Bindings[i] = binding
 				return nil
 			}

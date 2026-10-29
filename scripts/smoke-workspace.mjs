@@ -4,6 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { mkdir, writeFile, unlink } from "node:fs/promises";
 import { resolve, join } from "node:path";
 import { spawn, execFileSync } from "node:child_process";
+import { tmpdir } from "node:os";
 import { binaryDirectory } from "./app-config.mjs";
 
 assert.equal(process.platform, "win32");
@@ -275,7 +276,7 @@ try {
       if (await evaluate(expression)) return;
       await new Promise((r) => setTimeout(r, 100));
     }
-    throw new Error("UI did not reach: " + expression);
+    throw new Error("UI did not reach: " + expression + "\nDialog: " + await evaluate("document.querySelector('dialog')?.innerText.slice(0,500)"));
   };
   const click = async (selector) =>
     evaluate(
@@ -316,7 +317,15 @@ try {
     "Menu labels are not left aligned",
   );
   await capture("desktop-menu-left");
-  await textButton("文件");
+  assert(await evaluate(`!!document.querySelector('.desktop-window-controls')`), "Windows titlebar controls missing");
+  await textButton("设置…");
+  await until(`!!document.querySelector('dialog[open] .settings-page')`);
+  assert(await evaluate(`document.querySelector('.settings-page').getBoundingClientRect().height < 500`), "Settings form is too tall");
+  await capture("desktop-settings-compact");
+  await evaluate(`document.documentElement.setAttribute('data-theme','dark')`);
+  await capture("desktop-settings-dark");
+  await evaluate(`document.documentElement.setAttribute('data-theme','light')`);
+  await click('dialog button[aria-label="关闭"]');
   await click(".account-unit>button");
   await evaluate(
     `Array.from(document.querySelectorAll('.account-choice')).find(b=>b.querySelector('strong').textContent==='work').click()`,
@@ -430,7 +439,7 @@ try {
   );
   assert.equal(
     await evaluate(
-      `document.querySelector('.commit-identity')?.innerText.includes('Personal Name')`,
+      `document.querySelector('.commit-identity')?.innerText.includes('Work Name')`,
     ),
     true,
   );
@@ -513,7 +522,7 @@ try {
   await capture("desktop-history");
   assert(
     await evaluate(
-      `Array.from(document.querySelectorAll('.desktop-history-list > button')).every(b=>{const r=b.getBoundingClientRect();return r.height>=64 && Array.from(b.querySelectorAll('strong,small')).every(e=>{const c=e.getBoundingClientRect();return c.top>=r.top && c.bottom<=r.bottom})})`,
+      `Array.from(document.querySelectorAll('.desktop-history-list > button')).every(b=>{const r=b.getBoundingClientRect();return r.height>=46 && Array.from(b.querySelectorAll('strong,small')).every(e=>{const c=e.getBoundingClientRect();return c.top>=r.top && c.bottom<=r.bottom})})`,
     ),
     "History content exceeds highlight bounds",
   );
@@ -554,10 +563,10 @@ try {
   );
   await until(`!!document.querySelector('dialog[open] form')`);
   const retry = await evaluate(
-    `(()=>{const f=document.querySelector('dialog form');return {account:f.querySelectorAll('select')[0].value,profile:f.querySelectorAll('select')[1].value,inputs:Array.from(f.querySelectorAll('input')).map(i=>i.value),text:f.innerText}})()`,
+    `(()=>{const f=document.querySelector('dialog form');return {account:f.querySelector('select').value,inputs:Array.from(f.querySelectorAll('input')).map(i=>i.value),text:f.innerText}})()`,
   );
   assert.equal(retry.account, "work");
-  assert.equal(retry.profile, "work-profile");
+  assert(retry.text.includes("Work Name"));
   assert.deepEqual(retry.inputs, ["D:\\工作项目", "private checkout"]);
   assert(retry.text.includes("已恢复上次克隆"));
   await capture("desktop-clone-retry");
@@ -579,12 +588,12 @@ try {
   );
   assert.equal(latest.githubAuthConfigured, true);
   assert.equal(latest.settings.clientId, "");
-  // Defaults affect inherited projects; explicit project information takes precedence.
+  // Account authorship wins over the old global default; a project override wins over both.
   await evaluate(
     `window.__desktopCall.ByName('repo-berth/internal/service.Service.SaveSettings',${JSON.stringify({ ...payloads.settings, defaultCommitName: "Default Author", defaultCommitEmail: "default@example.test" })})`,
   );
   await until(
-    `document.querySelector('.commit-identity')?.innerText.includes('Default Author')`,
+    `document.querySelector('.commit-identity')?.innerText.includes('Personal Name')`,
   );
   await evaluate(
     `window.__desktopCall.ByName('repo-berth/internal/service.Service.SetCheckoutIdentity','personal-copy','Project Author','project@example.test')`,
@@ -596,9 +605,9 @@ try {
     `window.__desktopCall.ByName('repo-berth/internal/service.Service.SetCheckoutIdentity','personal-copy','','')`,
   );
   await until(
-    `document.querySelector('.commit-identity')?.innerText.includes('Default Author')`,
+    `document.querySelector('.commit-identity')?.innerText.includes('Personal Name')`,
   );
-  const plainPath = join(root, "ordinary notes");
+  const plainPath = join(tmpdir(), "repo-berth-smoke-" + Date.now(), "ordinary notes");
   await mkdir(plainPath, { recursive: true });
   await writeFile(join(plainPath, "keep.txt"), "precious notes");
   await textButton("文件");
@@ -635,23 +644,20 @@ try {
   await textButton("文件");
   await textButton("管理本地目录…");
   await until(`document.querySelectorAll('.local-management-row').length===3`);
-  await evaluate(
-    `Array.from(document.querySelectorAll('.local-management-row')).filter(r=>r.innerText.includes('ordinary notes')||r.innerText.includes('work checkout')).forEach(r=>r.querySelector('input').click())`,
-  );
-  await textButton("移出管理（2）");
-  await capture("desktop-bulk-remove");
+  await evaluate(`Array.from(document.querySelectorAll('.local-management-row')).find(r=>r.innerText.includes('ordinary notes')).querySelector('button').click()`);
+  await capture("desktop-single-remove");
   await send("Emulation.setDeviceMetricsOverride", {
     width: 390,
     height: 900,
     deviceScaleFactor: 1,
     mobile: false,
   });
-  await capture("desktop-bulk-remove-390");
+  await capture("desktop-single-remove-390");
   assert(
     await evaluate(
       `document.querySelector('dialog').scrollWidth<=document.querySelector('dialog').clientWidth+1`,
     ),
-    "Bulk confirmation overflows dialog",
+    "Directory confirmation overflows dialog",
   );
   await send("Emulation.setDeviceMetricsOverride", {
     width: 1440,
@@ -659,7 +665,12 @@ try {
     deviceScaleFactor: 1,
     mobile: false,
   });
-  await textButton("确认移出管理（2）");
+  await textButton("确认移出管理");
+  await until(`document.querySelectorAll('.local-management-row').length===2`);
+  await until(`!document.querySelector('dialog [role="alert"]')`);
+  await evaluate(`Array.from(document.querySelectorAll('.local-management-row')).find(r=>r.innerText.includes('work checkout')).querySelector('button').click()`);
+  await until(`document.querySelector('dialog [role="alert"]')?.innerText.includes('work checkout')`);
+  await textButton("确认移出管理");
   await until(`document.querySelectorAll('.local-management-row').length===1`);
   assert.equal(
     execFileSync(
@@ -696,6 +707,13 @@ try {
       await evaluate(`document.documentElement.scrollWidth<=innerWidth+1`),
       "Horizontal overflow at " + width,
     );
+    if (width === 390) {
+      await textButton("设置");
+      await until(`!!document.querySelector('dialog[open] .settings-page')`);
+      await capture("desktop-settings-390");
+      assert(await evaluate(`document.querySelector('dialog').scrollWidth<=document.querySelector('dialog').clientWidth+1`), "Settings overflow at 390px");
+      await click('dialog button[aria-label="关闭"]');
+    }
   }
   await send("Emulation.setDeviceMetricsOverride", {
     width: 1440,
@@ -719,7 +737,7 @@ try {
     false,
   );
   console.log(
-    "PASS: Desktop workspace, isolated accounts/drafts, commit recovery, history highlight geometry, default/project identities, explicit plain-directory import, atomic batch removal preserving files, clone retry and responsive geometry",
+    "PASS: Desktop workspace, isolated accounts/drafts, commit recovery, history highlight geometry, account/project identities, explicit plain-directory import, single-directory removal preserving files, clone retry and responsive geometry",
   );
 } finally {
   if (ws && ws.readyState < WebSocket.CLOSING)

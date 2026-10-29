@@ -75,6 +75,7 @@ func New(path string, p provider.Provider, v vault.Vault) (*Service, error) {
 			a.Status = "auth_required"
 		}
 	}
+	normalizeAccountProfiles(&s.state)
 	associate(&s.state)
 	if err = db.Save(s.state); err != nil {
 		cancel()

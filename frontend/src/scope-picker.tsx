@@ -8,7 +8,6 @@ import {
   Cloud,
   Clock3,
   Star,
-  Folder,
 } from "lucide-react";
 import { AccountAvatar } from "./components";
 import type { State } from "./types";
@@ -34,13 +33,8 @@ export function ScopePicker({
     { id: "recent", label: "最近访问", icon: <Clock3 size={16} /> },
     ...state.accounts.map((a) => ({
       id: `account:${a.id}`,
-      label: a.login + (a.note ? ` · ${a.note}` : ""),
+      label: a.login,
       icon: <AccountAvatar account={a} size={20} />,
-    })),
-    ...state.groups.map((g) => ({
-      id: `group:${g.id}`,
-      label: g.name,
-      icon: <Folder size={16} />,
     })),
   ];
   const selected = items.find((i) => i.id === value) || items[0];

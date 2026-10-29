@@ -63,6 +63,12 @@ interface Methods {
     profileID: string,
     dest: string,
   ) => string;
+  CloneFromURL: (
+    url: string,
+    accountID: string,
+    profileID: string,
+    dest: string,
+  ) => string;
   ToggleFavorite: (id: string) => void;
   MarkVisited: (id: string) => void;
   SaveGroup: (group: Group) => string;
@@ -76,6 +82,7 @@ interface Methods {
   GitCommitDiff: (id: string, hash: string) => string;
   GitBranches: (id: string) => Branch[];
   StageFile: (id: string, file: string, stage: boolean) => void;
+  StageFiles: (id: string, files: string[], stage: boolean) => void;
   CommitChanges: (id: string, remote: string, message: string) => string;
   SwitchBranch: (id: string, name: string, create: boolean) => string;
   GitNetwork: (id: string, remote: string, operation: string) => string;

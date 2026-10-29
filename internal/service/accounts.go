@@ -17,6 +17,40 @@ type Authorization struct {
 	ExpiresIn       int    `json:"expiresIn"`
 }
 
+// Older versions allowed several authors per account. Keep any different
+// author already selected for a checkout as a project override, then retain
+// the first profile as the account's single default author.
+func normalizeAccountProfiles(st *model.State) {
+	primary := map[string]model.CommitProfile{}
+	byID := map[string]model.CommitProfile{}
+	kept := make([]model.CommitProfile, 0, len(st.Profiles))
+	for _, p := range st.Profiles {
+		byID[p.ID] = p
+		if _, exists := primary[p.AccountID]; !exists {
+			primary[p.AccountID] = p
+			kept = append(kept, p)
+		}
+	}
+	for i := range st.Bindings {
+		b := &st.Bindings[i]
+		chosen, found := byID[b.ProfileID]
+		main, hasMain := primary[b.AccountID]
+		if !hasMain || !found || chosen.AccountID != b.AccountID {
+			continue
+		}
+		if chosen.ID != main.ID && (chosen.Name != main.Name || chosen.Email != main.Email) {
+			for j := range st.Checkouts {
+				if st.Checkouts[j].ID == b.CheckoutID && st.Checkouts[j].CommitName == "" {
+					st.Checkouts[j].CommitName = chosen.Name
+					st.Checkouts[j].CommitEmail = chosen.Email
+				}
+			}
+		}
+		b.ProfileID = main.ID
+	}
+	st.Profiles = kept
+}
+
 func (s *Service) StartAuthorization(sessionOnly bool, reauthorizeID string) (Authorization, error) {
 	st, err := s.Snapshot()
 	if err != nil {
@@ -173,9 +207,6 @@ func (s *Service) SaveProfile(profile model.CommitProfile) (string, error) {
 	if _, err := s.account(profile.AccountID); err != nil {
 		return "", err
 	}
-	if profile.ID == "" {
-		profile.ID = model.ID()
-	}
 	err := s.change(func(st *model.State) error {
 		accountExists := false
 		for _, account := range st.Accounts {
@@ -187,16 +218,41 @@ func (s *Service) SaveProfile(profile model.CommitProfile) (string, error) {
 		if !accountExists {
 			return model.Err("ACCOUNT_MISSING", "账号已移除，请重新选择")
 		}
-		for i := range st.Profiles {
-			if st.Profiles[i].ID == profile.ID {
-				if st.Profiles[i].AccountID != profile.AccountID {
-					return model.Err("INVALID_IDENTITY", "不能把现有提交身份移动到其他账号")
-				}
-				st.Profiles[i] = profile
-				return nil
+		for _, old := range st.Profiles {
+			if old.ID == profile.ID && old.AccountID != profile.AccountID {
+				return model.Err("INVALID_IDENTITY", "不能把现有提交身份移动到其他账号")
 			}
 		}
-		st.Profiles = append(st.Profiles, profile)
+		if existing := profileForAccount(st, profile.AccountID); existing != "" {
+			profile.ID = existing
+		} else if profile.ID == "" {
+			profile.ID = model.ID()
+		}
+		oldProfiles := map[string]model.CommitProfile{}
+		kept := make([]model.CommitProfile, 0, len(st.Profiles)+1)
+		for _, old := range st.Profiles {
+			if old.AccountID == profile.AccountID {
+				oldProfiles[old.ID] = old
+			} else {
+				kept = append(kept, old)
+			}
+		}
+		for i := range st.Bindings {
+			b := &st.Bindings[i]
+			if b.AccountID != profile.AccountID {
+				continue
+			}
+			if old, ok := oldProfiles[b.ProfileID]; ok && old.ID != profile.ID && (old.Name != profile.Name || old.Email != profile.Email) {
+				for j := range st.Checkouts {
+					if st.Checkouts[j].ID == b.CheckoutID && st.Checkouts[j].CommitName == "" {
+						st.Checkouts[j].CommitName = old.Name
+						st.Checkouts[j].CommitEmail = old.Email
+					}
+				}
+			}
+			b.ProfileID = profile.ID
+		}
+		st.Profiles = append(kept, profile)
 		return nil
 	})
 	return profile.ID, err

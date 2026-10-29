@@ -69,7 +69,7 @@ it("shows no ownership trust confirmation for historical scan failures", () => {
   expect(screen.queryByRole("dialog")).toBeNull();
 });
 
-it("uses the Settings default until a project explicitly overrides it", () => {
+it("uses the account identity until a project explicitly overrides it", () => {
   const st = structuredClone(emptyState);
   st.settings.defaultCommitName = "Default";
   st.settings.defaultCommitEmail = "default@example.test";
@@ -79,7 +79,7 @@ it("uses the Settings default until a project explicitly overrides it", () => {
     name: "Legacy",
     email: "legacy@example.test",
   };
-  expect(effectiveCommitIdentity(st, c, legacy)?.name).toBe("Default");
+  expect(effectiveCommitIdentity(st, c, legacy, true)?.name).toBe("Legacy");
   expect(
     effectiveCommitIdentity(
       st,
@@ -129,7 +129,7 @@ it("prefers per-remote association over the remembered fallback and keeps commit
   st.settings.defaultAccountId = "personal";
   expect(resolveAccessAccount(st, c, "origin").account?.id).toBe("work");
   expect(resolveAccessAccount(st, c, "origin").source).toBe("自动关联");
-  expect(resolveAccessAccount(st, c, "origin").profile?.name).toBe("Author");
+  expect(resolveAccessAccount(st, c, "origin").profile).toBeUndefined();
   expect(resolveAccessAccount(st, c, "upstream").account?.id).toBe("personal");
   expect(resolveAccessAccount(st, undefined, "").account?.id).toBe("personal");
   expect(githubRepositoryPath("git@github.com:organization/project.git")).toBe(
@@ -161,7 +161,7 @@ it("asks before adding a non-Git directory and requires a second action", async 
   await waitFor(() => expect(imported).toHaveBeenCalledWith("plain", "plain"));
 });
 
-it("bulk removal asks for confirmation and sends only selected checkout IDs", async () => {
+it("single directory removal asks for confirmation and leaves other rows untouched", async () => {
   const user = userEvent.setup();
   render(
     <LocalManagement
@@ -182,11 +182,12 @@ it("bulk removal asks for confirmation and sends only selected checkout IDs", as
       onClose={() => {}}
     />,
   );
-  await user.click(screen.getByLabelText(/notes · 普通目录/));
-  await user.click(screen.getByRole("button", { name: "移出管理（1）" }));
+  await user.click(screen.getAllByRole("button", { name: "移出管理" })[0]);
+  expect(screen.getByText(/确认将“notes”移出管理/)).toBeTruthy();
   expect(mocks.api).not.toHaveBeenCalled();
-  await user.click(screen.getByRole("button", { name: "确认移出管理（1）" }));
+  await user.click(screen.getByRole("button", { name: "确认移出管理" }));
   await waitFor(() =>
-    expect(mocks.api).toHaveBeenCalledWith("ForgetCheckouts", ["plain"]),
+    expect(mocks.api).toHaveBeenCalledWith("ForgetCheckout", "plain"),
   );
+  expect(screen.getByText(/project · Git 仓库/)).toBeTruthy();
 });

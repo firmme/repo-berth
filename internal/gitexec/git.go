@@ -388,29 +388,57 @@ func ValidFile(path string) error {
 	return nil
 }
 func (r Runner) Stage(ctx context.Context, path, file string, stage bool) error {
-	if err := ValidFile(file); err != nil {
+	return r.StageMany(ctx, path, []string{file}, stage)
+}
+
+func (r Runner) StageMany(ctx context.Context, path string, files []string, stage bool) error {
+	wanted := make(map[string]bool, len(files))
+	paths := make([]string, 0, len(files))
+	for _, file := range files {
+		if err := ValidFile(file); err != nil {
+			return err
+		}
+		if !wanted[file] {
+			wanted[file] = true
+			paths = append(paths, file)
+		}
+	}
+	if len(paths) == 0 {
+		return nil
+	}
+	if stage {
+		_, err := r.Run(ctx, path, nil, nil, append([]string{"add", "--"}, paths...)...)
 		return err
 	}
-	args := []string{"add", "--", file}
-	if !stage {
-		paths := []string{file}
-		if raw, err := r.Run(ctx, path, nil, nil, "status", "--porcelain=v1", "-z"); err == nil {
-			for _, f := range ParseStatus(raw) {
-				if f.Path == file && f.OriginalPath != "" {
-					if err := ValidFile(f.OriginalPath); err != nil {
-						return err
-					}
-					paths = append(paths, f.OriginalPath)
-				}
-			}
+	raw, err := r.Run(ctx, path, nil, nil, "status", "--porcelain=v1", "-z")
+	if err != nil {
+		return err
+	}
+	paths = paths[:0]
+	seen := map[string]bool{}
+	for _, f := range ParseStatus(raw) {
+		if !wanted[f.Path] || f.Index == " " || f.Index == "?" {
+			continue
 		}
-		if _, err := r.Run(ctx, path, nil, nil, "rev-parse", "--verify", "HEAD"); err == nil {
-			args = append([]string{"restore", "--staged", "--"}, paths...)
-		} else {
-			args = append([]string{"rm", "--cached", "--"}, paths...)
+		for _, file := range []string{f.Path, f.OriginalPath} {
+			if file == "" || seen[file] {
+				continue
+			}
+			if err := ValidFile(file); err != nil {
+				return err
+			}
+			seen[file] = true
+			paths = append(paths, file)
 		}
 	}
-	_, err := r.Run(ctx, path, nil, nil, args...)
+	if len(paths) == 0 {
+		return nil
+	}
+	args := append([]string{"restore", "--staged", "--"}, paths...)
+	if _, err := r.Run(ctx, path, nil, nil, "rev-parse", "--verify", "HEAD"); err != nil {
+		args = append([]string{"rm", "--cached", "--"}, paths...)
+	}
+	_, err = r.Run(ctx, path, nil, nil, args...)
 	return err
 }
 func (r Runner) Commit(ctx context.Context, path, message, name, email string) error {
@@ -515,7 +543,11 @@ func (r Runner) Clone(ctx context.Context, url, dest string, auth Auth) error {
 		}
 	}()
 	cloned := filepath.Join(staging, "repository")
-	if _, err = r.Run(ctx, parent, &auth, nil, "clone", "--progress", "--", url, cloned); err != nil {
+	var credentials *Auth
+	if auth.Login != "" && auth.Token != "" {
+		credentials = &auth
+	}
+	if _, err = r.Run(ctx, parent, credentials, nil, "clone", "--progress", "--", url, cloned); err != nil {
 		return err
 	}
 	if err = ctx.Err(); err != nil {

@@ -349,7 +349,26 @@ func (s *Service) CloneRepository(repoID, accountID, profileID, dest string) (st
 	if !allowed {
 		return "", model.Err("PERMISSION", "所选账号没有该仓库的访问记录，请先同步")
 	}
-	valid := false
+	return s.cloneRepository(repoID, repo.CloneURL, accountID, profileID, dest, false)
+}
+
+// CloneFromURL accepts an explicit GitHub HTTPS repository address, including
+// repositories that have not been synchronized into the account catalogue.
+func (s *Service) CloneFromURL(raw, accountID, profileID, dest string) (string, error) {
+	key, err := gitexec.GitHubTarget(strings.TrimSpace(raw))
+	if err != nil {
+		return "", err
+	}
+	url := "https://github.com/" + key + ".git"
+	return s.cloneRepository("", url, accountID, profileID, dest, true)
+}
+
+func (s *Service) cloneRepository(repoID, cloneURL, accountID, profileID, dest string, direct bool) (string, error) {
+	st, err := s.Snapshot()
+	if err != nil {
+		return "", err
+	}
+	valid := direct && accountID == "" && profileID == ""
 	for _, p := range st.Profiles {
 		if p.ID == profileID && p.AccountID == accountID {
 			valid = true
@@ -358,9 +377,12 @@ func (s *Service) CloneRepository(repoID, accountID, profileID, dest string) (st
 	if !valid {
 		return "", model.Err("IDENTITY_REQUIRED", "请先保存并选择该账号的提交身份")
 	}
-	a, err := s.account(accountID)
-	if err != nil {
-		return "", err
+	var a model.Account
+	if accountID != "" {
+		a, err = s.account(accountID)
+		if err != nil {
+			return "", err
+		}
 	}
 	parent, err := gitexec.Canonical(filepath.Dir(dest))
 	if err != nil {
@@ -372,43 +394,61 @@ func (s *Service) CloneRepository(repoID, accountID, profileID, dest string) (st
 	}
 	dest = filepath.Join(parent, name)
 	request := &model.CloneRequest{AccountID: accountID, ProfileID: profileID, Destination: dest}
-	return s.taskWithInitial("clone", repoID, model.Task{CloneRequest: request}, func(ctx context.Context, taskID string) error {
+	target := repoID
+	if direct {
+		request.URL = cloneURL
+		target = cloneURL
+	}
+	return s.taskWithInitial("clone", target, model.Task{CloneRequest: request}, func(ctx context.Context, taskID string) error {
 		lock := s.workLock(dest)
 		if err := lock.Lock(ctx); err != nil {
 			return err
 		}
 		defer lock.Unlock()
-		accountLock := s.accountLock(accountIdentity(a))
-		if err := accountLock.Lock(ctx); err != nil {
-			return err
+		if accountID != "" {
+			accountLock := s.accountLock(accountIdentity(a))
+			if err := accountLock.Lock(ctx); err != nil {
+				return err
+			}
+			defer accountLock.Unlock()
 		}
-		defer accountLock.Unlock()
 		// A profile can be removed while this task is waiting for a worker or
 		// repository lock. Never create a binding to a vanished identity.
-		if err := s.validateCloneProfile(accountID, profileID); err != nil {
-			return err
+		var auth gitexec.Auth
+		if accountID != "" {
+			if err := s.validateCloneProfile(accountID, profileID); err != nil {
+				return err
+			}
+			a, err := s.account(accountID)
+			if err != nil {
+				return err
+			}
+			token, err := s.vault.Get(a.CredentialRef)
+			if err != nil {
+				s.markAuthFailure(accountID, err)
+				return err
+			}
+			helper, err := os.Executable()
+			if err != nil {
+				return err
+			}
+			auth = gitexec.Auth{URL: cloneURL, Login: a.Login, Token: token, Helper: helper}
+			_ = s.updateTask(taskID, func(t *model.Task) { t.Progress = "正在克隆，使用账号 " + a.Login })
+		} else {
+			_ = s.updateTask(taskID, func(t *model.Task) { t.Progress = "正在克隆公开仓库" })
 		}
-		a, err := s.account(accountID)
-		if err != nil {
-			return err
-		}
-		token, err := s.vault.Get(a.CredentialRef)
-		if err != nil {
-			s.markAuthFailure(accountID, err)
-			return err
-		}
-		helper, err := os.Executable()
-		if err != nil {
-			return err
-		}
-		_ = s.updateTask(taskID, func(t *model.Task) { t.Progress = "正在克隆，使用账号 " + a.Login })
-		if err = s.progressRunner(taskID).Clone(ctx, repo.CloneURL, dest, gitexec.Auth{URL: repo.CloneURL, Login: a.Login, Token: token, Helper: helper}); err != nil {
-			s.markAuthFailure(accountID, err)
+		if err = s.progressRunner(taskID).Clone(ctx, cloneURL, dest, auth); err != nil {
+			if accountID != "" {
+				s.markAuthFailure(accountID, err)
+			}
 			return err
 		}
 		id, err := s.importPath(ctx, dest)
 		if err != nil {
 			return err
+		}
+		if accountID == "" {
+			return nil
 		}
 		return s.change(func(st *model.State) error {
 			found := false
@@ -422,11 +462,11 @@ func (s *Service) CloneRepository(repoID, accountID, profileID, dest string) (st
 				return model.Err("IDENTITY_REQUIRED", "克隆文件已保留，但提交身份已移除；请导入目录并重新绑定身份")
 			}
 			for i := range st.Checkouts {
-				if st.Checkouts[i].ID == id {
+				if st.Checkouts[i].ID == id && repoID != "" {
 					st.Checkouts[i].RepositoryID = repoID
 				}
 			}
-			st.Bindings = append(st.Bindings, model.RepositoryBinding{ID: id + ":origin", CheckoutID: id, Remote: "origin", AccountID: accountID, ProfileID: profileID, RemoteURL: repo.CloneURL, PushURL: repo.CloneURL})
+			st.Bindings = append(st.Bindings, model.RepositoryBinding{ID: id + ":origin", CheckoutID: id, Remote: "origin", AccountID: accountID, ProfileID: profileID, RemoteURL: cloneURL, PushURL: cloneURL})
 			return nil
 		})
 	})

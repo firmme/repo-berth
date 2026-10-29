@@ -76,7 +76,7 @@ export interface Task {
   logs?: { at: string; message: string }[];
   canResumeAuthorization?: boolean;
   authorizationRecoveryExpiresAt?: string;
-  cloneRequest?: { accountId: string; profileId: string; destination: string };
+  cloneRequest?: { accountId: string; profileId: string; destination: string; url?: string };
   scanSummary?: {
     imported: number;
     skipped: number;

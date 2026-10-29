@@ -19,9 +19,7 @@ export function resolveAccessAccount(
     (a) => a.id === (binding?.accountId || st.settings.defaultAccountId),
   );
   const profiles = st.profiles.filter((p) => p.accountId === account?.id);
-  const profile =
-    st.profiles.find((p) => p.id === binding?.profileId) ||
-    (!binding && profiles.length === 1 ? profiles[0] : undefined);
+  const profile = profiles[0];
   return {
     binding,
     account,
@@ -46,15 +44,18 @@ export function effectiveCommitIdentity(
   st: State,
   checkout: Checkout,
   legacy?: Profile,
+  hasAccount = false,
 ) {
   if (checkout.commitName)
     return { name: checkout.commitName, email: checkout.commitEmail || "" };
+  if (legacy?.name) return legacy;
+  if (hasAccount) return undefined;
   if (st.settings.defaultCommitName)
     return {
       name: st.settings.defaultCommitName,
       email: st.settings.defaultCommitEmail || "",
     };
-  return legacy;
+  return undefined;
 }
 
 export function CheckoutIdentity({
@@ -112,7 +113,7 @@ export function CheckoutIdentity({
         </>
       ) : (
         <p className="subtle-note">
-          使用设置中的默认提交姓名和邮箱。尚未设置默认值时，兼容已有绑定的提交身份。
+          使用当前访问账号的提交姓名和邮箱；可在“账号与身份”中修改。
         </p>
       )}
       <button type="submit">保存项目提交设置</button>
@@ -131,8 +132,7 @@ export function LocalManagement({
   onClose: () => void;
 }) {
   const [query, setQuery] = useState("");
-  const [selected, setSelected] = useState<string[]>([]);
-  const [confirm, setConfirm] = useState(false);
+  const [selected, setSelected] = useState<Checkout>();
   const [pending, setPending] = useState(false);
   const visible = st.checkouts.filter((c) =>
     (c.name + " " + c.path).toLowerCase().includes(query.toLowerCase()),
@@ -141,56 +141,19 @@ export function LocalManagement({
     st.tasks.some(
       (t) => t.target === id && ["running", "queued"].includes(t.state),
     );
-  const toggle = (id: string) => {
-    setConfirm(false);
-    setSelected((v) =>
-      v.includes(id) ? v.filter((x) => x !== id) : [...v, id],
-    );
-  };
   return (
     <Modal title="管理本地目录" onClose={onClose}>
-      <p>批量移出应用管理，保留磁盘上的全部文件与 Git 历史。</p>
+      <p>查看已添加的目录。移出管理会保留磁盘上的文件与 Git 历史。</p>
       <Field label="筛选本地目录">
         <input
           value={query}
           disabled={pending}
-          onChange={(e) => {
-            setQuery(e.target.value);
-            setConfirm(false);
-          }}
+          onChange={(e) => setQuery(e.target.value)}
         />
       </Field>
-      <label className="checkbox-label">
-        <input
-          type="checkbox"
-          disabled={pending || !visible.some((c) => !busy(c.id))}
-          checked={
-            !!visible.length &&
-            visible
-              .filter((c) => !busy(c.id))
-              .every((c) => selected.includes(c.id))
-          }
-          onChange={(e) => {
-            setConfirm(false);
-            const ids = visible.filter((c) => !busy(c.id)).map((c) => c.id);
-            setSelected((v) =>
-              e.target.checked
-                ? [...new Set([...v, ...ids])]
-                : v.filter((id) => !ids.includes(id)),
-            );
-          }}
-        />
-        选择当前列表
-      </label>
       <div className="local-management-list">
         {visible.map((c) => (
-          <label className="local-management-row" key={c.id}>
-            <input
-              type="checkbox"
-              checked={selected.includes(c.id)}
-              disabled={pending || busy(c.id)}
-              onChange={() => toggle(c.id)}
-            />
+          <div className="local-management-row" key={c.id}>
             <span>
               <strong>
                 {c.name} · {c.plainDirectory ? "普通目录" : "Git 仓库"}
@@ -198,44 +161,27 @@ export function LocalManagement({
               </strong>
               <small>{c.path}</small>
             </span>
-          </label>
+            <button disabled={pending || busy(c.id)} onClick={() => setSelected(c)}>移出管理</button>
+          </div>
         ))}
         {!visible.length && <p>没有匹配的本地目录</p>}
       </div>
-      {confirm && (
+      {selected && (
         <div role="alert">
-          <p>
-            确认将以下 {selected.length} 个目录移出管理？此操作不会删除文件。
-          </p>
-          <ul>
-            {st.checkouts
-              .filter((c) => selected.includes(c.id))
-              .map((c) => (
-                <li key={c.id}>{c.path}</li>
-              ))}
-          </ul>
+          <p>确认将“{selected.name}”移出管理？此操作不会删除文件。</p>
+          <p className="path-text">{selected.path}</p>
+          <div className="form-actions">
+            <button disabled={pending} onClick={() => setSelected(undefined)}>取消</button>
+            <button disabled={pending || busy(selected.id)} onClick={() => {
+              setPending(true);
+              void execute(() => api("ForgetCheckout", selected.id)).then(() => setSelected(undefined)).finally(() => setPending(false));
+            }}>确认移出管理</button>
+          </div>
         </div>
       )}
       <div className="form-actions">
         <button disabled={pending} onClick={onClose}>
           关闭
-        </button>
-        <button
-          disabled={pending || !selected.length || selected.some(busy)}
-          onClick={() => {
-            if (!confirm) {
-              setConfirm(true);
-              return;
-            }
-            setPending(true);
-            void execute(async () => {
-              await api("ForgetCheckouts", selected);
-              setSelected([]);
-              setConfirm(false);
-            }).finally(() => setPending(false));
-          }}
-        >
-          {confirm ? "确认移出管理" : "移出管理"}（{selected.length}）
         </button>
       </div>
     </Modal>

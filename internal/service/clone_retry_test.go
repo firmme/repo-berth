@@ -100,3 +100,26 @@ func TestQueuedCloneRejectsDeletedProfileBeforeNetwork(t *testing.T) {
 		t.Fatalf("invalid identity created checkout: %v", err)
 	}
 }
+
+func TestCloneFromURLAcceptsUnsyncedRepositoryAndRetainsRetryURL(t *testing.T) {
+	s, _, _ := newTestService(t, &fakeProvider{})
+	defer Close(s)
+	cloneRetryFixture(t, s)
+	dest := filepath.Join(t.TempDir(), "external")
+	id, err := s.CloneFromURL("https://github.com/other/public.git", "work", "chosen", dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task := waitTask(t, s, id)
+	if task.CloneRequest == nil || task.CloneRequest.URL != "https://github.com/other/public.git" {
+		t.Fatalf("direct clone URL missing from retry context: %+v", task.CloneRequest)
+	}
+	if _, err := s.CloneFromURL("https://github.com/other/public.git?token=secret", "work", "chosen", dest); err == nil {
+		t.Fatal("URL with query credentials was accepted")
+	}
+	publicID, err := s.CloneFromURL("https://github.com/other/public.git", "", "", filepath.Join(t.TempDir(), "public"))
+	if err != nil {
+		t.Fatalf("public clone required an account: %v", err)
+	}
+	_ = s.CancelTask(publicID)
+}

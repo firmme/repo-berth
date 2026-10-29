@@ -96,7 +96,7 @@ func main() {
 	}
 	app.RegisterService(application.NewService(svc))
 	service.Attach(svc, desktop{app}, func(name string, data any) { app.Event.Emit(name, data) })
-	app.Window.NewWithOptions(application.WebviewWindowOptions{Title: "Repo Berth · 仓库工作台", Width: 1440, Height: 920, MinWidth: 900, MinHeight: 640, URL: "/"})
+	app.Window.NewWithOptions(application.WebviewWindowOptions{Title: "Repo Berth · 仓库工作台", Width: 1440, Height: 920, MinWidth: 900, MinHeight: 640, Frameless: runtime.GOOS == "windows", URL: "/"})
 	app.OnShutdown(func() { service.Close(svc) })
 	if err = app.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, "应用启动失败:", err)

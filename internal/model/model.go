@@ -123,6 +123,7 @@ type CloneRequest struct {
 	AccountID   string `json:"accountId"`
 	ProfileID   string `json:"profileId"`
 	Destination string `json:"destination"`
+	URL         string `json:"url,omitempty"`
 }
 type TaskLog struct {
 	At      string `json:"at"`
