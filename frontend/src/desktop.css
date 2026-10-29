@@ -5,6 +5,7 @@
   --text: #24292f;
   --muted: #57606a;
   --control: #c8ced5;
+  --control-hover: #7c8b98;
   --rule: #e4e7eb;
   --ground: #f6f8fa;
   --surface: #fff;
@@ -157,6 +158,36 @@
   font-size: 13px;
   font-weight: 600;
 }
+.network-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+.network-title > strong {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.sync-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  height: 18px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: #3b4249;
+  color: #d0d7de;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+}
+.sync-ahead {
+  color: #7ee787;
+}
+.sync-behind {
+  color: #79c0ff;
+}
 .repository-unit h1 {
   font-size: 13px;
   font-weight: 600;
@@ -259,12 +290,50 @@
   left: 0;
   width: 238px;
   padding: 5px 0;
+  overflow: visible;
 }
 .menu-popover > button {
   width: 100%;
   display: flex;
   padding: 6px 14px;
   height: auto;
+}
+.menu-submenu {
+  position: relative;
+}
+.menu-submenu-trigger {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 14px;
+}
+.menu-submenu-panel {
+  display: none;
+  position: absolute;
+  left: 100%;
+  top: -5px;
+  min-width: 170px;
+  padding: 5px 0;
+  background: #fff;
+  border: 1px solid #bfc6ce;
+  border-radius: 6px;
+  box-shadow: 0 6px 18px #00000022;
+}
+.menu-submenu:hover > .menu-submenu-panel,
+.menu-submenu:focus-within > .menu-submenu-panel {
+  display: block;
+}
+.menu-submenu-panel > button {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 14px;
+}
+.menu-submenu-panel > button.checked {
+  color: #0550ae;
+  font-weight: 600;
 }
 .menu-popover > p {
   margin: 6px 14px;
@@ -1521,11 +1590,13 @@
   color-scheme: dark;
   --ground: #111820; --surface: #1a232d; --raised: #25313e; --active: #30445a;
   --border: #344352; --rule: #2a3845; --control: #536578;
+  --control-hover: #7590a8;
   --text: #e9f1f8; --muted: #b0c0ce; --faint: #9daebb;
   --primary: #2686e5; --accent: #73b6ff; --positive: #6bd4a0; --negative: #ff858c;
 }
 :root[data-theme="dark"] .desktop-shell {
   --accent: #73b6ff; --text: #e9f1f8; --muted: #b0c0ce; --control: #536578;
+  --control-hover: #7590a8;
   --rule: #2a3845; --ground: #111820; --surface: #1a232d; --active: #30445a;
   background: #111820;
 }
@@ -1763,3 +1834,50 @@
 .desktop-shell .desktop-commit > :is(input, textarea) { background: var(--field); color: var(--text); border-color: var(--field-border); }
 .desktop-shell .desktop-commit :is(.commit-caption, .commit-identity small) { color: var(--secondary-text); }
 :root[data-theme="dark"] .desktop-stage-error { background: #4a2632; color: #ffb8c1; border-color: #754552; }
+
+/* Interactive feedback and dark popover surfaces. */
+:root[data-theme="dark"] .desktop-shell .desktop-popover {
+  background: var(--pane);
+  border-color: var(--field-border);
+}
+:root[data-theme="dark"] .desktop-shell :is(input, textarea, select) {
+  background: var(--field);
+  border-color: var(--field-border);
+}
+:root[data-theme="dark"] .desktop-shell .desktop-popover header,
+:root[data-theme="dark"] .desktop-shell .branch-popover form {
+  background: var(--pane-emphasis);
+  border-color: var(--soft-border);
+  color: var(--text);
+}
+:root[data-theme="dark"] .desktop-shell .branch-popover form button {
+  background: var(--field);
+  border-color: var(--field-border);
+  color: var(--text);
+}
+:root[data-theme="dark"] .desktop-shell .branch-popover form button:hover:not(:disabled) {
+  background: var(--row-hover);
+}
+.desktop-shell .scope-picker-trigger:hover:not(:disabled),
+.desktop-shell .file-filter:hover,
+.desktop-shell .repository-picker-tools label:hover {
+  border-color: var(--control-hover);
+}
+:root[data-theme="dark"] .desktop-shell .scope-picker-trigger:hover:not(:disabled),
+:root[data-theme="dark"] .desktop-shell .file-filter:hover,
+:root[data-theme="dark"] .desktop-shell .repository-picker-tools label:hover {
+  background: var(--row-hover);
+}
+.desktop-shell :is(input, textarea, select):hover:not(:disabled):not(:focus) {
+  border-color: var(--control-hover);
+}
+.desktop-shell :is(input, textarea, select):focus {
+  border-color: var(--accent);
+}
+:root[data-theme="dark"] .desktop-shell .menu-submenu-panel {
+  background: var(--pane);
+  border-color: var(--field-border);
+}
+:root[data-theme="dark"] .desktop-shell .menu-submenu-panel > button.checked {
+  color: var(--accent);
+}

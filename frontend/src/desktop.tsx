@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ChevronDown,
+  ChevronRight,
   GitBranch,
   RefreshCw,
   ArrowDown,
@@ -83,6 +84,12 @@ type Panel =
   | "forget"
   | "share"
   | "about";
+type MenuNode = {
+  label: string;
+  action?: () => void;
+  disabled?: boolean;
+  children?: { label: string; action: () => void; checked?: boolean }[];
+};
 export default function Desktop() {
   const client = useQueryClient(),
     ui = useUI();
@@ -179,20 +186,6 @@ export default function Desktop() {
         t.state === "succeeded",
     )?.finishedAt ||
     "";
-  const syncSummary =
-    !checkout || checkout.plainDirectory
-      ? ""
-      : !remote
-        ? "此仓库未配置 remote"
-        : ahead && behind
-          ? `本地 ${ahead} 个未推送 · 远端 ${behind} 个待拉取`
-          : ahead
-            ? `本地有 ${ahead} 个提交未推送`
-            : behind
-              ? `远端有 ${behind} 个新提交`
-              : tracking || matchingUpstream
-                ? "已与远端同步"
-                : "尚无远端跟踪分支，可 Fetch 检查";
   const {
     account,
     profile,
@@ -362,10 +355,7 @@ export default function Desktop() {
   );
   const action =
     behind && !ahead ? "pull" : ahead && !behind ? "push" : "fetch";
-  const menuItems: Record<
-    string,
-    { label: string; action: () => void; disabled?: boolean }[]
-  > = {
+  const menuItems: Record<string, MenuNode[]> = {
     file: [
       { label: "添加本地仓库…", action: () => show("import") },
       { label: "管理本地目录…", action: () => show("local-management") },
@@ -419,9 +409,26 @@ export default function Desktop() {
           setPopup("");
         },
       },
-      { label: `跟随系统主题${theme === "system" ? "（当前）" : ""}`, action: () => setTheme("system") },
-      { label: `日间主题${theme === "light" ? "（当前）" : ""}`, action: () => setTheme("light") },
-      { label: `暗黑主题${theme === "dark" ? "（当前）" : ""}`, action: () => setTheme("dark") },
+      {
+        label: "主题",
+        children: [
+          {
+            label: "跟随系统",
+            checked: theme === "system",
+            action: () => setTheme("system"),
+          },
+          {
+            label: "日间",
+            checked: theme === "light",
+            action: () => setTheme("light"),
+          },
+          {
+            label: "暗黑",
+            checked: theme === "dark",
+            action: () => setTheme("dark"),
+          },
+        ],
+      },
     ],
     repository: [
       {
@@ -564,18 +571,45 @@ export default function Desktop() {
                 branchPopup
               ) : (
                 <div className="desktop-popover menu-popover">
-                  {menuItems[id]?.map((item) => (
-                    <button
-                      key={item.label}
-                      disabled={item.disabled}
-                      onClick={() => {
-                        setPopup("");
-                        item.action();
-                      }}
-                    >
-                      {item.label}
-                    </button>
-                  ))}
+                  {menuItems[id]?.map((item) =>
+                    item.children ? (
+                      <div className="menu-submenu" key={item.label}>
+                        <button
+                          className="menu-submenu-trigger"
+                          disabled={item.disabled}
+                        >
+                          {item.label}
+                          <ChevronRight size={14} />
+                        </button>
+                        <div className="menu-submenu-panel">
+                          {item.children.map((child) => (
+                            <button
+                              key={child.label}
+                              className={child.checked ? "checked" : ""}
+                              onClick={() => {
+                                setPopup("");
+                                child.action();
+                              }}
+                            >
+                              {child.label}
+                              {child.checked && <Check size={14} />}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ) : (
+                      <button
+                        key={item.label}
+                        disabled={item.disabled}
+                        onClick={() => {
+                          setPopup("");
+                          item.action?.();
+                        }}
+                      >
+                        {item.label}
+                      </button>
+                    ),
+                  )}
                 </div>
               ))}
           </div>
@@ -641,23 +675,35 @@ export default function Desktop() {
               <RefreshCw size={20} className={busy ? "spinning" : ""} />
             )}
             <span>
-              <strong>
-                {action === "fetch"
-                  ? "Fetch"
-                  : action === "pull"
-                    ? "Pull"
-                    : "Push"}{" "}
-                {remote || "remote"}{" "}
-                {ahead ? `↑${ahead}` : ""}
-                {behind ? ` ↓${behind}` : ""}
-              </strong>
-              <small>
-                {busy
-                  ? "正在处理仓库任务…"
-                  : syncSummary
-                    ? `${syncSummary}${lastFetch ? ` · 上次获取 ${new Date(lastFetch).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}` : ""}`
-                    : "请选择本地仓库"}
-              </small>
+              <span className="network-title">
+                <strong>
+                  {action === "fetch"
+                    ? "Fetch"
+                    : action === "pull"
+                      ? "Pull"
+                      : "Push"}{" "}
+                  {remote || "remote"}
+                </strong>
+                {(ahead > 0 || behind > 0) && (
+                  <span className="sync-pill">
+                    {ahead > 0 && <span className="sync-ahead">↑{ahead}</span>}
+                    {behind > 0 && (
+                      <span className="sync-behind">↓{behind}</span>
+                    )}
+                  </span>
+                )}
+              </span>
+              {busy ? (
+                <small>执行中…</small>
+              ) : lastFetch ? (
+                <small>
+                  上次获取{" "}
+                  {new Date(lastFetch).toLocaleTimeString("zh-CN", {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
+                </small>
+              ) : null}
             </span>
           </button>
           {popupButton("network", <ChevronDown size={14} />, "network-more")}
@@ -673,13 +719,12 @@ export default function Desktop() {
                   }}
                 >
                   {op === "fetch"
-                    ? "Fetch · 获取远程更新"
+                    ? "Fetch"
                     : op === "pull"
-                      ? "Pull · 仅快进拉取"
-                      : "Push · 推送当前分支"}
+                      ? "Pull"
+                      : "Push"}
                 </button>
               ))}
-              <p>访问账号：{account?.login || "尚未绑定"}</p>
             </div>
           )}
         </div>

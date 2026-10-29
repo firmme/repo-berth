@@ -13,6 +13,7 @@
   --border: #e8eaec;
   --rule: #f0f1f2;
   --control: #cdd2d5;
+  --control-hover: #9aa3a8;
   --text: #13191d;
   --muted: #5d656b;
   --faint: #656c72;
@@ -121,6 +122,20 @@ select {
   color: var(--text);
   padding: 8px 10px;
   outline-offset: 1px;
+  transition:
+    border-color 0.12s ease,
+    background-color 0.12s ease,
+    box-shadow 0.12s ease;
+}
+input:hover:not(:disabled):not(:focus),
+textarea:hover:not(:disabled):not(:focus),
+select:hover:not(:disabled):not(:focus) {
+  border-color: var(--control-hover);
+}
+input:focus,
+textarea:focus,
+select:focus {
+  border-color: var(--accent);
 }
 input,
 select {
