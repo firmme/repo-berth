@@ -62,6 +62,13 @@ export function rowsFromState(st: State): Row[] {
         favorite: c.favorite,
         lastOpened: c.lastOpened,
       });
+  rows.sort((a, b) => {
+    const aUsed = a.lastOpened || "";
+    const bUsed = b.lastOpened || "";
+    if (aUsed !== bUsed) return bUsed.localeCompare(aUsed);
+    if (a.favorite !== b.favorite) return a.favorite ? -1 : 1;
+    return `${a.owner}/${a.name}`.localeCompare(`${b.owner}/${b.name}`);
+  });
   return rows;
 }
 export function filterRows(

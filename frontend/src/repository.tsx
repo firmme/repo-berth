@@ -379,6 +379,15 @@ export function RepositoryDetail({
   });
   const remotes = status.data?.remotes || checkout?.remotes || [];
   const selectedRemote = remotes.some((r) => r.name === remote) ? remote : "";
+  const tracking = status.data?.tracking?.find(
+    (t) => t.remote === selectedRemote,
+  );
+  const upstreamRemote = status.data?.upstream?.split("/")[0] || "";
+  const matchingUpstream = !!selectedRemote && upstreamRemote === selectedRemote;
+  const ahead =
+    tracking?.ahead ?? (matchingUpstream ? status.data?.ahead ?? 0 : 0);
+  const behind =
+    tracking?.behind ?? (matchingUpstream ? status.data?.behind ?? 0 : 0);
   const binding = st.bindings.find(
     (b) => b.checkoutId === checkout?.id && b.remote === selectedRemote,
   );
@@ -584,11 +593,24 @@ export function RepositoryDetail({
                     )}
                     <span className="ahead-behind">
                       <ArrowUp size={13} />
-                      {status.data?.ahead ?? 0}
+                      {ahead}
                       <ArrowDown size={13} />
-                      {status.data?.behind ?? 0}
+                      {behind}
                     </span>
                   </div>
+                  {selectedRemote && (
+                    <p className="subtle-note">
+                      {ahead && behind
+                        ? `本地 ${ahead} 个提交未推送，远端 ${behind} 个提交待拉取。`
+                        : ahead
+                          ? `本地有 ${ahead} 个提交未推送。`
+                          : behind
+                            ? `远端有 ${behind} 个新提交，可 Pull。`
+                            : tracking || matchingUpstream
+                              ? "已与远端同步。"
+                              : "尚无远端跟踪分支，可先 Fetch 检查远端更新。"}
+                    </p>
+                  )}
                   <div className="git-actions">
                     <button
                       disabled={networkUnavailable}

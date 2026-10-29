@@ -98,6 +98,24 @@ describe("repository projection", () => {
   });
   it("keeps all zero counts honest for first run", () =>
     expect(rowsFromState(emptyState)).toEqual([]));
+  it("puts recently used repositories before unused ones", () => {
+    const st = fixture();
+    st.repositories.unshift({
+      id: "unused",
+      owner: "team",
+      name: "aaa-unused",
+      description: "",
+      cloneUrl: "https://github.com/team/aaa-unused.git",
+      url: "",
+      private: false,
+      language: "",
+      updatedAt: "",
+      favorite: false,
+    });
+    const ids = rowsFromState(st).map((r) => r.id);
+    expect(ids[0]).toBe("shared");
+    expect(ids.indexOf("shared")).toBeLessThan(ids.indexOf("unused"));
+  });
   it("keeps local identity bindings discoverable after cloud access disappears", () => {
     const st = fixture();
     st.access = st.access.filter((a) => a.accountId !== "work");

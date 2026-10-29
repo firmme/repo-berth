@@ -189,3 +189,56 @@ export function Stamp({ date }: { date: string }) {
     </time>
   );
 }
+
+const repositoryGradients = [
+  { from: "#e0f2fe", to: "#bae6fd", ink: "#0c4a6e" },
+  { from: "#dbeafe", to: "#bfdbfe", ink: "#1e3a8a" },
+  { from: "#ede9fe", to: "#ddd6fe", ink: "#4c1d95" },
+  { from: "#fce7f3", to: "#fbcfe8", ink: "#831843" },
+  { from: "#ffe4e6", to: "#fecdd3", ink: "#881337" },
+  { from: "#fef3c7", to: "#fde68a", ink: "#78350f" },
+  { from: "#dcfce7", to: "#bbf7d0", ink: "#14532d" },
+  { from: "#ccfbf1", to: "#99f6e4", ink: "#134e4a" },
+  { from: "#ecfccb", to: "#d9f99d", ink: "#365314" },
+  { from: "#ffedd5", to: "#fed7aa", ink: "#7c2d12" },
+];
+
+export function repositoryMark(name: string) {
+  const chars = Array.from((name || "").trim());
+  let hash = 0;
+  for (const char of chars.length ? chars : ["?"]) {
+    hash = (hash * 31 + (char.codePointAt(0) || 0)) >>> 0;
+  }
+  const palette = repositoryGradients[hash % repositoryGradients.length];
+  return {
+    ...palette,
+    initial: (chars[0] || "?").toUpperCase(),
+  };
+}
+
+export function RepositoryMark({
+  name,
+  size = 30,
+  className = "",
+}: {
+  name: string;
+  size?: number;
+  className?: string;
+}) {
+  const mark = repositoryMark(name);
+  return (
+    <span
+      aria-hidden="true"
+      className={`repo-mark ${className}`}
+      style={{
+        width: size,
+        height: size,
+        fontSize: Math.round(size * 0.44),
+        background: `linear-gradient(135deg, ${mark.from}, ${mark.to})`,
+        color: mark.ink,
+      }}
+    >
+      {mark.initial}
+    </span>
+  );
+}

@@ -392,3 +392,45 @@ func TestClassifyWorkflowScopeRejection(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+func TestStatusReportsTrackingForConfiguredRemote(t *testing.T) {
+	path := initRepo(t)
+	r := Runner{Binary: "git"}
+	ctx := context.Background()
+	if err := os.WriteFile(filepath.Join(path, "base.txt"), []byte("base"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	testGit(t, path, "add", ".")
+	testGit(t, path, "-c", "user.name=Test", "-c", "user.email=test@example.test", "commit", "-m", "base")
+	testGit(t, path, "remote", "add", "origin", "https://github.com/team/project.git")
+	testGit(t, path, "update-ref", "refs/remotes/origin/main", "HEAD")
+	base := testGit(t, path, "rev-parse", "HEAD")
+	if err := os.WriteFile(filepath.Join(path, "local.txt"), []byte("local"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	testGit(t, path, "add", ".")
+	testGit(t, path, "-c", "user.name=Test", "-c", "user.email=test@example.test", "commit", "-m", "local")
+	status, err := r.Status(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(status.Tracking) != 1 || status.Tracking[0].Remote != "origin" || status.Tracking[0].Ahead != 1 || status.Tracking[0].Behind != 0 {
+		t.Fatalf("unexpected tracking: %+v", status.Tracking)
+	}
+	testGit(t, path, "checkout", "-b", "remote-only", base)
+	if err := os.WriteFile(filepath.Join(path, "remote.txt"), []byte("remote"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	testGit(t, path, "add", ".")
+	testGit(t, path, "-c", "user.name=Test", "-c", "user.email=test@example.test", "commit", "-m", "remote")
+	remoteCommit := testGit(t, path, "rev-parse", "HEAD")
+	testGit(t, path, "checkout", "main")
+	testGit(t, path, "update-ref", "refs/remotes/origin/main", remoteCommit)
+	status, err = r.Status(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(status.Tracking) != 1 || status.Tracking[0].Ahead != 1 || status.Tracking[0].Behind != 1 {
+		t.Fatalf("unexpected diverged tracking: %+v", status.Tracking)
+	}
+}

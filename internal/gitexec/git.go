@@ -34,13 +34,20 @@ type FileStatus struct {
 	Worktree     string `json:"worktree"`
 }
 type Status struct {
-	Branch   string       `json:"branch"`
-	Upstream string       `json:"upstream"`
-	Ahead    int          `json:"ahead"`
-	Behind   int          `json:"behind"`
-	Files    []FileStatus `json:"files"`
-	Remotes  []Remote     `json:"remotes"`
-	Detached bool         `json:"detached"`
+	Branch   string           `json:"branch"`
+	Upstream string           `json:"upstream"`
+	Ahead    int              `json:"ahead"`
+	Behind   int              `json:"behind"`
+	Files    []FileStatus     `json:"files"`
+	Remotes  []Remote         `json:"remotes"`
+	Tracking []RemoteTracking `json:"tracking"`
+	Detached bool             `json:"detached"`
+}
+type RemoteTracking struct {
+	Remote string `json:"remote"`
+	Branch string `json:"branch"`
+	Ahead  int    `json:"ahead"`
+	Behind int    `json:"behind"`
 }
 type Remote struct {
 	Name    string `json:"name"`
@@ -294,7 +301,7 @@ func embeddedCredentials(raw string) bool {
 	return password || u.Scheme != "ssh"
 }
 func (r Runner) Status(ctx context.Context, path string) (Status, error) {
-	s := Status{Files: []FileStatus{}, Remotes: []Remote{}}
+	s := Status{Files: []FileStatus{}, Remotes: []Remote{}, Tracking: []RemoteTracking{}}
 	out, err := r.Run(ctx, path, nil, nil, "status", "--porcelain=v1", "-z", "--untracked-files=all")
 	if err != nil {
 		return s, err
@@ -316,7 +323,26 @@ func (r Runner) Status(ctx context.Context, path string) (Status, error) {
 		}
 	}
 	s.Remotes, err = r.Remotes(ctx, path)
-	return s, err
+	if err != nil {
+		return s, err
+	}
+	if s.Detached || s.Branch == "" {
+		return s, nil
+	}
+	for _, remote := range s.Remotes {
+		ref := "refs/remotes/" + remote.Name + "/" + s.Branch
+		if _, err := r.Run(ctx, path, nil, nil, "rev-parse", "--verify", "--quiet", ref); err != nil {
+			continue
+		}
+		counts, err := r.Run(ctx, path, nil, nil, "rev-list", "--left-right", "--count", "HEAD..."+ref)
+		if err != nil {
+			continue
+		}
+		var ahead, behind int
+		_, _ = fmt.Sscanf(counts, "%d\t%d", &ahead, &behind)
+		s.Tracking = append(s.Tracking, RemoteTracking{Remote: remote.Name, Branch: s.Branch, Ahead: ahead, Behind: behind})
+	}
+	return s, nil
 }
 func ParseStatus(out string) []FileStatus {
 	result := []FileStatus{}

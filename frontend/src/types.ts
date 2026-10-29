@@ -122,6 +122,12 @@ export interface FileStatus {
   index: string;
   worktree: string;
 }
+export interface RemoteTracking {
+  remote: string;
+  branch: string;
+  ahead: number;
+  behind: number;
+}
 export interface GitStatus {
   branch: string;
   upstream: string;
@@ -129,6 +135,7 @@ export interface GitStatus {
   behind: number;
   files: FileStatus[];
   remotes: { name: string; url: string; pushUrl: string }[];
+  tracking?: RemoteTracking[];
   detached: boolean;
 }
 export interface Commit {

@@ -44,6 +44,7 @@ import {
   ErrorNotice,
   Loading,
   AccountAvatar,
+  RepositoryMark,
 } from "./components";
 import { ScopePicker } from "./scope-picker";
 import { AccountsView, SettingsView } from "./settings";
@@ -123,6 +124,22 @@ export default function Desktop() {
     rows.find((r) => r.checkouts.some((c) => c.id === copyID));
   const checkout =
     selected?.checkouts.find((c) => c.id === copyID) || selected?.checkouts[0];
+  const restored = useRef(false);
+  useEffect(() => {
+    if (restored.current || loading || ui.selected) return;
+    restored.current = true;
+    const used = rows.filter((r) => r.lastOpened && r.checkouts.length);
+    if (!used.length) return;
+    const row = used.reduce((a, b) =>
+      b.lastOpened > a.lastOpened ? b : a,
+    );
+    const copy = row.checkouts.reduce(
+      (a, b) => ((b.lastOpened || "") > (a.lastOpened || "") ? b : a),
+      row.checkouts[0],
+    );
+    ui.set({ selected: row.id, view: "repositories" });
+    if (copy) setCopyID(copy.id);
+  }, [loading, rows, ui]);
   const status = useQuery({
     queryKey: ["git", "status", checkout?.id],
     queryFn: () => api("GitStatus", checkout!.id),
@@ -148,6 +165,34 @@ export default function Desktop() {
   const remote = remotes.some((r) => r.name === requestedRemote)
     ? requestedRemote
     : "";
+  const tracking = status.data?.tracking?.find((t) => t.remote === remote);
+  const upstreamRemote = status.data?.upstream?.split("/")[0] || "";
+  const matchingUpstream = !!remote && upstreamRemote === remote;
+  const ahead = tracking?.ahead ?? (matchingUpstream ? status.data?.ahead ?? 0 : 0);
+  const behind = tracking?.behind ?? (matchingUpstream ? status.data?.behind ?? 0 : 0);
+  const lastFetch =
+    lastFetched[checkout?.id || ""] ||
+    st.tasks.find(
+      (t) =>
+        t.kind === "fetch" &&
+        t.target === checkout?.id &&
+        t.state === "succeeded",
+    )?.finishedAt ||
+    "";
+  const syncSummary =
+    !checkout || checkout.plainDirectory
+      ? ""
+      : !remote
+        ? "此仓库未配置 remote"
+        : ahead && behind
+          ? `本地 ${ahead} 个未推送 · 远端 ${behind} 个待拉取`
+          : ahead
+            ? `本地有 ${ahead} 个提交未推送`
+            : behind
+              ? `远端有 ${behind} 个新提交`
+              : tracking || matchingUpstream
+                ? "已与远端同步"
+                : "尚无远端跟踪分支，可 Fetch 检查";
   const {
     account,
     profile,
@@ -269,6 +314,8 @@ export default function Desktop() {
     setPopup("");
     setTab("changes");
     void api("MarkVisited", row.id).catch((e) => setError(errorMessage(e)));
+    if (id && id !== row.id)
+      void api("MarkVisited", id).catch((e) => setError(errorMessage(e)));
   };
   const openTarget = (target: string) => {
     const row = rows.find((r) => r.checkouts.some((c) => c.id === target));
@@ -314,11 +361,7 @@ export default function Desktop() {
     </select>
   );
   const action =
-    status.data?.behind && !status.data.ahead
-      ? "pull"
-      : status.data?.ahead && !status.data.behind
-        ? "push"
-        : "fetch";
+    behind && !ahead ? "pull" : ahead && !behind ? "push" : "fetch";
   const menuItems: Record<
     string,
     { label: string; action: () => void; disabled?: boolean }[]
@@ -553,7 +596,11 @@ export default function Desktop() {
           {popupButton(
             "repositories",
             <>
-              <FolderGit2 size={20} />
+              {selected ? (
+                <RepositoryMark name={selected.name} size={28} />
+              ) : (
+                <FolderGit2 size={20} />
+              )}
               <span>
                 <small>当前仓库</small>
                 <h1>{selected?.name || "选择仓库"}</h1>
@@ -601,18 +648,15 @@ export default function Desktop() {
                     ? "Pull"
                     : "Push"}{" "}
                 {remote || "remote"}{" "}
-                {action === "push" && status.data?.ahead
-                  ? `↑${status.data.ahead}`
-                  : ""}
+                {ahead ? `↑${ahead}` : ""}
+                {behind ? ` ↓${behind}` : ""}
               </strong>
               <small>
                 {busy
                   ? "正在处理仓库任务…"
-                  : lastFetched[checkout?.id || ""]
-                    ? `上次获取 ${new Date(lastFetched[checkout!.id]).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}`
-                    : checkout
-                      ? "获取远程更新"
-                      : "请选择本地仓库"}
+                  : syncSummary
+                    ? `${syncSummary}${lastFetch ? ` · 上次获取 ${new Date(lastFetch).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}` : ""}`
+                    : "请选择本地仓库"}
               </small>
             </span>
           </button>
@@ -735,11 +779,7 @@ export default function Desktop() {
                         choose(row, c.id, b?.remote);
                       }}
                     >
-                      {c.plainDirectory ? (
-                        <FolderOpen size={16} />
-                      ) : (
-                        <FolderGit2 size={16} />
-                      )}
+                      <RepositoryMark name={row.name} />
                       <span>
                         <strong>
                           {row.repository
@@ -754,7 +794,7 @@ export default function Desktop() {
                   ))
                 ) : (
                   <button className="repository-row" onClick={() => clone(row)}>
-                    <FolderGit2 size={16} />
+                    <RepositoryMark name={row.name} />
                     <span>
                       <strong>
                         {row.owner}/{row.name}
