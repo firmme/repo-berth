@@ -35,6 +35,10 @@ it("numbers real patch lines and resets line counters for each file", () => {
   expect(document.querySelectorAll(".diff-line.file")).toHaveLength(2);
   expect(screen.queryByText("--- a/code.ts")).toBeNull();
   expect(screen.queryByText("+++ b/code.ts")).toBeNull();
+  const summary = document.querySelector(".diff-summary")!;
+  expect(summary.textContent).toContain("2 个文件");
+  expect(summary.textContent).toContain("+3");
+  expect(summary.textContent).toContain("−2");
 });
 
 it("omits redundant file headers in a selected-file diff", () => {

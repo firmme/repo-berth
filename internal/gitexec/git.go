@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"repo-berth/internal/model"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -55,11 +56,14 @@ type Remote struct {
 	PushURL string `json:"pushUrl"`
 }
 type Commit struct {
-	Hash    string `json:"hash"`
-	Author  string `json:"author"`
-	Email   string `json:"email"`
-	Date    string `json:"date"`
-	Subject string `json:"subject"`
+	Hash       string `json:"hash"`
+	Author     string `json:"author"`
+	Email      string `json:"email"`
+	Date       string `json:"date"`
+	Subject    string `json:"subject"`
+	Files      int    `json:"files"`
+	Insertions int    `json:"insertions"`
+	Deletions  int    `json:"deletions"`
 }
 type Branch struct {
 	Name    string `json:"name"`
@@ -376,17 +380,44 @@ func (r Runner) CommitDiff(ctx context.Context, path, hash string) (string, erro
 	return r.Run(ctx, path, nil, nil, "show", "--format=", "--no-ext-diff", "--no-textconv", "--find-renames", hash, "--")
 }
 func (r Runner) History(ctx context.Context, path string) ([]Commit, error) {
-	out, err := r.Run(ctx, path, nil, nil, "log", "-50", "--format=%H%x00%an%x00%ae%x00%aI%x00%s%x00")
+	out, err := r.Run(ctx, path, nil, nil, "log", "-50", "--numstat", "--format=%x1e%H%x00%an%x00%ae%x00%aI%x00%s")
 	if err != nil {
 		if _, headErr := r.Run(ctx, path, nil, nil, "rev-parse", "--verify", "HEAD"); headErr != nil {
 			return []Commit{}, nil
 		}
 		return nil, err
 	}
-	fields := strings.Split(out, "\x00")
 	result := []Commit{}
-	for i := 0; i+4 < len(fields); i += 5 {
-		result = append(result, Commit{strings.TrimSpace(fields[i]), fields[i+1], fields[i+2], fields[i+3], fields[i+4]})
+	for _, record := range strings.Split(out, "\x1e") {
+		lines := strings.Split(strings.TrimLeft(record, "\n"), "\n")
+		if len(lines) == 0 {
+			continue
+		}
+		fields := strings.SplitN(lines[0], "\x00", 5)
+		if len(fields) != 5 {
+			continue
+		}
+		commit := Commit{
+			Hash:    strings.TrimSpace(fields[0]),
+			Author:  fields[1],
+			Email:   fields[2],
+			Date:    fields[3],
+			Subject: fields[4],
+		}
+		for _, line := range lines[1:] {
+			parts := strings.SplitN(strings.TrimSpace(line), "\t", 3)
+			if len(parts) != 3 {
+				continue
+			}
+			commit.Files++
+			if added, parseErr := strconv.Atoi(parts[0]); parseErr == nil {
+				commit.Insertions += added
+			}
+			if removed, parseErr := strconv.Atoi(parts[1]); parseErr == nil {
+				commit.Deletions += removed
+			}
+		}
+		result = append(result, commit)
 	}
 	return result, nil
 }

@@ -1481,14 +1481,21 @@ function Worktree({
     enabled: tab === "history" && !!commit,
   });
   const historyFiles = useMemo(() => {
-    const chunks = (commitDiff.data || "").split(/(?=^diff --git )/m).filter((chunk) => chunk.startsWith("diff --git "));
-    return chunks.map((diff) => ({
-      path: (() => {
-        const header = /^diff --git (?:"a\/.*" "b\/([^"]+)"|a\/.* b\/(.*))$/m.exec(diff);
-        return header?.[1] || header?.[2] || "未知文件";
-      })(),
-      diff,
-    })).sort((a, b) => a.path.localeCompare(b.path));
+    const chunks = (commitDiff.data || "")
+      .split(/(?=^diff --git )/m)
+      .filter((chunk) => chunk.startsWith("diff --git "));
+    return chunks
+      .map((diff) => ({
+        path: (() => {
+          const header =
+            /^diff --git (?:"a\/.*" "b\/([^"]+)"|a\/.* b\/(.*))$/m.exec(diff);
+          return header?.[1] || header?.[2] || "未知文件";
+        })(),
+        diff,
+        kind: diffChangeKind(diff),
+        ...diffStats(diff),
+      }))
+      .sort((a, b) => a.path.localeCompare(b.path));
   }, [commitDiff.data]);
   const account = st.accounts.find((a) => a.id === accountID),
     profile = effectiveCommitIdentity(
@@ -1709,6 +1716,11 @@ function Worktree({
                     <small>
                       {item.author} · <RelativeTime date={item.date} />
                     </small>
+                    <small className="history-stats">
+                      <span>{item.files} 个文件</span>
+                      <span className="stat-add">+{item.insertions}</span>
+                      <span className="stat-del">−{item.deletions}</span>
+                    </small>
                   </span>
                 </button>
               ))
@@ -1744,7 +1756,7 @@ function Worktree({
                   <nav className="desktop-history-tree" aria-label="提交文件树">
                     <div className="history-tree-heading">文件变更 <span>{historyFiles.length}</span></div>
                     <button className={!historyFile ? "selected" : ""} onClick={() => setHistoryFile("")}>全部文件</button>
-                    {historyFiles.flatMap(({ path }, index) => {
+                    {historyFiles.flatMap(({ path, kind }, index) => {
                       const parts = path.split("/");
                       const folders = parts.slice(0, -1);
                       const visible = folders.every((_, level) => !collapsedFolders.has(folders.slice(0, level + 1).join("/")));
@@ -1756,7 +1768,7 @@ function Worktree({
                           <ChevronDown size={13} className={collapsedFolders.has(folderPath) ? "collapsed" : ""} /><span>{name}</span>
                         </button>;
                       });
-                      return [...folderRows, ...(visible ? [<button key={`file:${path}`} className={historyFile === path ? "selected" : ""} style={{ paddingLeft: 10 + folders.length * 13 }} title={path} onClick={() => setHistoryFile(path)}>
+                      return [...folderRows, ...(visible ? [<button key={`file:${path}`} className={`history-file-${kind}${historyFile === path ? " selected" : ""}`} style={{ paddingLeft: 10 + folders.length * 13 }} title={path} onClick={() => setHistoryFile(path)}>
                         <FileText size={14} /><span>{parts.at(-1)}</span>
                       </button>] : [])];
                     })}
@@ -1880,6 +1892,28 @@ function RelativeTime({ date }: { date: string }) {
 function hasUnstaged(f: FileStatus) {
   return f.worktree !== " " || f.index === "?";
 }
+function diffStats(text: string) {
+  let files = 0,
+    insertions = 0,
+    deletions = 0;
+  for (const line of text.split("\n")) {
+    if (line.startsWith("diff --git ")) files++;
+    else if (line.startsWith("+++ ") || line.startsWith("--- ")) continue;
+    else if (line.startsWith("+")) insertions++;
+    else if (line.startsWith("-")) deletions++;
+  }
+  return { files, insertions, deletions };
+}
+
+function diffChangeKind(diff: string) {
+  if (/^new file mode /m.test(diff) || /^--- \/dev\/null$/m.test(diff))
+    return "added";
+  if (/^deleted file mode /m.test(diff) || /^\+\+\+ \/dev\/null$/m.test(diff))
+    return "deleted";
+  if (/^rename (?:from|to) /m.test(diff)) return "renamed";
+  return "modified";
+}
+
 export function DiffViewer({
   text,
   showFileHeaders = true,
@@ -1888,6 +1922,7 @@ export function DiffViewer({
   showFileHeaders?: boolean;
 }) {
   const [limit, setLimit] = useState(1500);
+  const stats = useMemo(() => diffStats(text), [text]);
   const lines = useMemo(() => {
     let old = 0,
       next = 0;
@@ -1933,6 +1968,11 @@ export function DiffViewer({
   }, [text, showFileHeaders]);
   return (
     <div className="desktop-diff" role="region" aria-label="文件差异">
+      <div className="diff-summary" aria-label="差异统计">
+        <span>{stats.files} 个文件</span>
+        <span className="stat-add">+{stats.insertions}</span>
+        <span className="stat-del">−{stats.deletions}</span>
+      </div>
       <div className="diff-table">
         {lines.slice(0, limit).map((row) => (
           <div className={`diff-line ${row.type}`} key={row.index}>

@@ -1912,3 +1912,60 @@
   background: var(--pane-emphasis);
   border-bottom-color: var(--soft-border);
 }
+
+.history-stats {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-variant-numeric: tabular-nums;
+}
+.history-stats .stat-add,
+.diff-summary .stat-add {
+  color: var(--positive);
+  font-weight: 600;
+}
+.history-stats .stat-del,
+.diff-summary .stat-del {
+  color: var(--negative);
+  font-weight: 600;
+}
+.diff-summary {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 30px;
+  padding: 0 15px;
+  background: var(--pane);
+  border-bottom: 1px solid var(--soft-border);
+  color: var(--muted);
+  font-family: "IBM Plex Sans", "Microsoft YaHei", "PingFang SC", sans-serif;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.desktop-shell .desktop-history-tree button.history-file-added {
+  color: #1a7f37;
+}
+.desktop-shell .desktop-history-tree button.history-file-deleted {
+  color: #cf222e;
+}
+.desktop-shell .desktop-history-tree button.history-file-modified {
+  color: #8a6a1d;
+}
+.desktop-shell .desktop-history-tree button.history-file-renamed {
+  color: #8250df;
+}
+:root[data-theme="dark"] .desktop-shell .desktop-history-tree button.history-file-added {
+  color: #74dba4;
+}
+:root[data-theme="dark"] .desktop-shell .desktop-history-tree button.history-file-deleted {
+  color: #ff9099;
+}
+:root[data-theme="dark"] .desktop-shell .desktop-history-tree button.history-file-modified {
+  color: #f0bb72;
+}
+:root[data-theme="dark"] .desktop-shell .desktop-history-tree button.history-file-renamed {
+  color: #c7a6ff;
+}

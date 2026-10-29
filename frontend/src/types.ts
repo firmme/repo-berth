@@ -144,6 +144,9 @@ export interface Commit {
   email: string;
   date: string;
   subject: string;
+  files: number;
+  insertions: number;
+  deletions: number;
 }
 export interface Branch {
   name: string;
