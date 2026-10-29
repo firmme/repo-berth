@@ -69,6 +69,13 @@ interface Methods {
     profileID: string,
     dest: string,
   ) => string;
+  ShareRepository: (
+    checkoutID: string,
+    accountID: string,
+    name: string,
+    description: string,
+    isPrivate: boolean,
+  ) => string;
   ToggleFavorite: (id: string) => void;
   MarkVisited: (id: string) => void;
   SaveGroup: (group: Group) => string;

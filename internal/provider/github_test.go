@@ -120,3 +120,35 @@ func TestRealPollCancellation(t *testing.T) {
 		t.Fatalf("expected cancellation, got %v", err)
 	}
 }
+
+func TestCreateRepositorySendsJSONAndReadsCloneURL(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" || r.URL.Path != "/user/repos" {
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+		if r.Header.Get("Authorization") != "Bearer test-secret" {
+			t.Error("missing auth")
+		}
+		if r.Header.Get("Content-Type") != "application/json" {
+			t.Errorf("content type %q", r.Header.Get("Content-Type"))
+		}
+		var in CreateRepositoryInput
+		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+			t.Errorf("decode: %v", err)
+		}
+		if in.Name != "shared" || !in.Private || in.Description != "demo" {
+			t.Errorf("payload %+v", in)
+		}
+		fmt.Fprint(w, `{"id":7,"name":"shared","clone_url":"https://github.com/personal/shared.git","html_url":"https://github.com/personal/shared","private":true,"owner":{"login":"personal"}}`)
+	}))
+	defer server.Close()
+	g := NewGitHub()
+	g.API = server.URL
+	repo, err := g.CreateRepository(context.Background(), "test-secret", CreateRepositoryInput{Name: "shared", Description: "demo", Private: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if repo.CloneURL != "https://github.com/personal/shared.git" || repo.Owner.Login != "personal" || !repo.Private {
+		t.Fatalf("repo %+v", repo)
+	}
+}

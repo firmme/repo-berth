@@ -65,6 +65,12 @@ func (p *fakeProvider) Emails(context.Context, string) ([]provider.Email, error)
 func (p *fakeProvider) Repositories(context.Context, string) ([]provider.Repository, error) {
 	return p.repos, nil
 }
+func (p *fakeProvider) CreateRepository(_ context.Context, _ string, in provider.CreateRepositoryInput) (provider.Repository, error) {
+	repo := provider.Repository{ID: 900, Name: in.Name, Description: in.Description, CloneURL: "https://github.com/" + p.user.Login + "/" + in.Name + ".git", HTMLURL: "https://github.com/" + p.user.Login + "/" + in.Name, Private: in.Private}
+	repo.Owner.Login = p.user.Login
+	repo.Permissions.Push = true
+	return repo, nil
+}
 func newTestService(t *testing.T, p *fakeProvider) (*Service, *fakeVault, string) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "berth.db")

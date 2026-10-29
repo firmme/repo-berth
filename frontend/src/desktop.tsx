@@ -24,6 +24,7 @@ import {
   ArrowLeft,
   Minus,
   Square,
+  Github,
 } from "lucide-react";
 import { version } from "../package.json";
 import { api, errorMessage, isDesktop, onStateChanged } from "./api";
@@ -46,7 +47,7 @@ import {
 } from "./components";
 import { ScopePicker } from "./scope-picker";
 import { AccountsView, SettingsView } from "./settings";
-import { BindingModal, CloneForm, CloneURLForm } from "./repository";
+import { BindingModal, CloneForm, CloneURLForm, ShareForm } from "./repository";
 import { ImportModal, TaskRow } from "./workspace-tools";
 import {
   CheckoutIdentity,
@@ -79,6 +80,7 @@ type Panel =
   | "clone-url"
   | "local-management"
   | "forget"
+  | "share"
   | "about";
 export default function Desktop() {
   const client = useQueryClient(),
@@ -389,6 +391,15 @@ export default function Desktop() {
         label: "在 GitHub 中查看",
         disabled: !selected?.repository,
         action: () => void execute(() => api("OpenRepository", selected!.id)),
+      },
+      {
+        label: "分享到 GitHub…",
+        disabled:
+          !checkout ||
+          !!checkout.plainDirectory ||
+          !st.accounts.length ||
+          remotes.some((r) => /github\.com/i.test(r.url)),
+        action: () => show("share"),
       },
       {
         label: "仓库设置…",
@@ -1101,6 +1112,13 @@ export default function Desktop() {
                 <Star size={14} />
                 {selected?.favorite ? "取消收藏" : "收藏仓库"}
               </button>
+              {!checkout.plainDirectory &&
+                !remotes.some((r) => /github\.com/i.test(r.url)) && (
+                  <button onClick={() => show("share")}>
+                    <Github size={14} />
+                    分享到 GitHub
+                  </button>
+                )}
               {selected?.repository && (
                 <button onClick={() => clone(selected)}>
                   <Plus size={14} />
@@ -1117,6 +1135,20 @@ export default function Desktop() {
       )}
       {panel === "local-management" && (
         <LocalManagement st={st} execute={execute} onClose={closePanel} />
+      )}
+      {panel === "share" && checkout && (
+        <Modal title="分享到 GitHub" onClose={closePanel}>
+          <ShareForm
+            key={checkout.id}
+            checkout={checkout}
+            st={st}
+            execute={execute}
+            onDone={() => {
+              closePanel();
+              ui.set({ tasksOpen: true });
+            }}
+          />
+        </Modal>
       )}
       {panel === "forget" && checkout && (
         <Modal title="将此本地副本移出管理？" onClose={closePanel}>

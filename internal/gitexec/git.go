@@ -209,6 +209,8 @@ func classify(s string) error {
 		return model.Err("DUBIOUS_OWNERSHIP", "Git 目录所有者检查失败，请重新选择本地仓库")
 	case strings.Contains(lower, "authentication failed") || strings.Contains(lower, "could not read username"):
 		return model.Err("AUTH_REQUIRED", "凭据被拒绝，请重新授权并确认仓库绑定账号")
+	case strings.Contains(lower, "refusing to allow") && strings.Contains(lower, "workflow"):
+		return model.Err("WORKFLOW_SCOPE", "GitHub 拒绝了 .github/workflows 文件；请重新授权账号并允许 workflow 权限后重试")
 	case strings.Contains(lower, "403") || strings.Contains(lower, "permission") || strings.Contains(lower, "repository not found"):
 		return model.Err("PERMISSION", "无法访问仓库，请检查账号权限、组织 SSO 或仓库地址")
 	case strings.Contains(lower, "fast-forward") || strings.Contains(lower, "non-fast-forward"):

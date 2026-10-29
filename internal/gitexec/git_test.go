@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"repo-berth/internal/model"
 	"strings"
 	"testing"
 	"time"
@@ -381,5 +382,13 @@ func TestDivergedPullAndPushPreserveLocalHistory(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(left, "left.txt")); err != nil {
 		t.Fatal("local file lost")
+	}
+}
+
+func TestClassifyWorkflowScopeRejection(t *testing.T) {
+	err := classify("remote: refusing to allow an OAuth App to create or update workflow `.github/workflows/ci.yml` without `workflow` scope")
+	appErr, ok := err.(*model.AppError)
+	if !ok || appErr.Code != "WORKFLOW_SCOPE" {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }

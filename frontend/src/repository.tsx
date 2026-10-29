@@ -18,6 +18,8 @@ import {
   Check,
   RefreshCw,
   FolderGit2,
+  Upload,
+  Github,
 } from "lucide-react";
 import { api, errorMessage } from "./api";
 import { useUI } from "./ui";
@@ -201,6 +203,135 @@ export function CloneURLForm({
     <Field label="新建目录名称"><input required pattern="[^/\\]+" value={folder} onChange={(e) => setFolder(e.target.value)} /></Field>
     <div className="form-actions"><button className="primary" disabled={busy || !validURL || (!!accountID && !profile) || !parent || !folder.trim()}>克隆仓库</button></div>
   </form>;
+}
+export function ShareForm({
+  checkout,
+  st,
+  execute,
+  onDone,
+}: {
+  checkout: Checkout;
+  st: State;
+  execute: Execute;
+  onDone: () => void;
+}) {
+  const withProfile = st.accounts.filter((a) =>
+    st.profiles.some((p) => p.accountId === a.id),
+  );
+  const [accountID, setAccountID] = useState(
+    withProfile.find((a) => a.id === st.settings.defaultAccountId)?.id ||
+      withProfile[0]?.id ||
+      "",
+  );
+  const [name, setName] = useState(checkout.name);
+  const [description, setDescription] = useState("");
+  const [isPrivate, setPrivate] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const profile = st.profiles.find((p) => p.accountId === accountID);
+  const trimmed = name.trim();
+  const validName =
+    /^[A-Za-z0-9._-]{1,100}$/.test(trimmed) &&
+    trimmed !== "." &&
+    trimmed !== "..";
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        void execute(async () => {
+          setBusy(true);
+          try {
+            await api(
+              "ShareRepository",
+              checkout.id,
+              accountID,
+              trimmed,
+              description.trim(),
+              isPrivate,
+            );
+            onDone();
+          } finally {
+            setBusy(false);
+          }
+        });
+      }}
+    >
+      <p className="clone-repository">
+        <Github size={19} />
+        {checkout.name} <Upload size={15} /> GitHub
+      </p>
+      <p className="subtle-note">
+        将在所选账号下创建新仓库，把当前目录添加为 origin 并推送当前分支。
+      </p>
+      {!withProfile.length ? (
+        <p className="empty-note">
+          请先在“账号与身份”中为 GitHub 账号设置提交姓名和邮箱。
+        </p>
+      ) : (
+        <Field label="发布到账号">
+          <select
+            value={accountID}
+            onChange={(e) => setAccountID(e.target.value)}
+          >
+            {withProfile.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.login}
+              </option>
+            ))}
+          </select>
+        </Field>
+      )}
+      <Field label="仓库名称">
+        <input
+          required
+          autoFocus
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="my-project"
+        />
+      </Field>
+      {!validName && trimmed && (
+        <p className="empty-note">
+          名称只能包含字母、数字、点、下划线和连字符。
+        </p>
+      )}
+      <Field label="仓库描述（可选）">
+        <textarea
+          rows={3}
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          placeholder="简要说明这个仓库的用途"
+        />
+      </Field>
+      <label className="checkbox-label">
+        <input
+          type="checkbox"
+          checked={isPrivate}
+          onChange={(e) => setPrivate(e.target.checked)}
+        />
+        私有仓库（仅自己和协作者可见）
+      </label>
+      {profile && (
+        <p className="subtle-note">
+          提交信息：{profile.name} &lt;{profile.email}&gt;
+        </p>
+      )}
+      <div className="form-actions">
+        <button
+          className="primary"
+          disabled={
+            busy ||
+            !accountID ||
+            !profile ||
+            !validName ||
+            description.trim().length > 350
+          }
+        >
+          <Upload size={16} />
+          创建并推送
+        </button>
+      </div>
+    </form>
+  );
 }
 export function RepositoryDetail({
   row,

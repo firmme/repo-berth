@@ -7,8 +7,10 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"repo-berth/internal/gitexec"
 	"repo-berth/internal/model"
+	"repo-berth/internal/provider"
 	"sort"
 	"strings"
 	"time"
@@ -469,6 +471,127 @@ func (s *Service) cloneRepository(repoID, cloneURL, accountID, profileID, dest s
 			st.Bindings = append(st.Bindings, model.RepositoryBinding{ID: id + ":origin", CheckoutID: id, Remote: "origin", AccountID: accountID, ProfileID: profileID, RemoteURL: cloneURL, PushURL: cloneURL})
 			return nil
 		})
+	})
+}
+
+var githubRepositoryName = regexp.MustCompile(`^[A-Za-z0-9._-]{1,100}$`)
+
+// ShareRepository creates a new GitHub repository for an existing local
+// checkout, adds it as origin, then pushes the current branch. The repository
+// is created before the push so a failed push can be retried from the UI.
+func (s *Service) ShareRepository(checkoutID, accountID, name, description string, private bool) (string, error) {
+	c, err := s.gitCheckout(checkoutID)
+	if err != nil {
+		return "", err
+	}
+	name, description = strings.TrimSpace(name), strings.TrimSpace(description)
+	if name == "." || name == ".." || !githubRepositoryName.MatchString(name) {
+		return "", model.Err("INVALID_NAME", "仓库名称只能包含字母、数字、点、下划线和连字符，最多 100 个字符")
+	}
+	if len([]rune(description)) > 350 {
+		return "", model.Err("INVALID_DESCRIPTION", "仓库描述不能超过 350 个字符")
+	}
+	if _, err = s.account(accountID); err != nil {
+		return "", err
+	}
+	st, err := s.Snapshot()
+	if err != nil {
+		return "", err
+	}
+	if profileForAccount(&st, accountID) == "" {
+		return "", model.Err("IDENTITY_REQUIRED", "请先为该账号设置提交姓名和邮箱")
+	}
+	return s.task("share", c.ID, func(ctx context.Context, taskID string) error {
+		lock := s.workLock(c.Path)
+		if err := lock.Lock(ctx); err != nil {
+			return err
+		}
+		defer lock.Unlock()
+		if err := s.validateCheckout(c); err != nil {
+			return err
+		}
+		a, err := s.account(accountID)
+		if err != nil {
+			return err
+		}
+		accountLock := s.accountLock(accountIdentity(a))
+		if err := accountLock.Lock(ctx); err != nil {
+			return err
+		}
+		defer accountLock.Unlock()
+		st, err := s.Snapshot()
+		if err != nil {
+			return err
+		}
+		profileID := profileForAccount(&st, accountID)
+		if profileID == "" {
+			return model.Err("IDENTITY_REQUIRED", "排队期间提交身份已移除，请重新选择账号")
+		}
+		remotes, err := s.runner().Remotes(ctx, c.Path)
+		if err != nil {
+			return err
+		}
+		for _, r := range remotes {
+			if r.Name == "origin" {
+				return model.Err("REMOTE_EXISTS", "此仓库已有 origin remote；请使用 Push 或先移除该 remote")
+			}
+			if _, e := gitexec.GitHubTarget(r.URL); e == nil {
+				return model.Err("ALREADY_SHARED", "此仓库已关联 GitHub 远程仓库")
+			}
+		}
+		if _, err = s.runner().Run(ctx, c.Path, nil, nil, "rev-parse", "--verify", "HEAD"); err != nil {
+			return model.Err("NO_COMMITS", "请先提交至少一次，再分享到 GitHub")
+		}
+		a, err = s.account(accountID)
+		if err != nil {
+			return err
+		}
+		token, err := s.vault.Get(a.CredentialRef)
+		if err != nil {
+			s.markAuthFailure(accountID, err)
+			return err
+		}
+		_ = s.updateTask(taskID, func(t *model.Task) { t.Progress = "正在创建 GitHub 仓库 " + name })
+		repo, err := s.provider.CreateRepository(ctx, token, provider.CreateRepositoryInput{Name: name, Description: description, Private: private})
+		if err != nil {
+			s.markAuthFailure(accountID, err)
+			return err
+		}
+		key, err := gitexec.GitHubTarget(repo.CloneURL)
+		if err != nil {
+			return model.Err("PROVIDER", "GitHub 返回了无效的仓库地址")
+		}
+		cloneURL := "https://github.com/" + key + ".git"
+		if _, err = s.runner().Run(ctx, c.Path, nil, nil, "remote", "add", "origin", cloneURL); err != nil {
+			return err
+		}
+		if _, err = s.importPath(ctx, c.Path); err != nil {
+			return err
+		}
+		binding := model.RepositoryBinding{ID: c.ID + ":origin", CheckoutID: c.ID, Remote: "origin", AccountID: accountID, ProfileID: profileID, RemoteURL: cloneURL, PushURL: cloneURL}
+		if err = s.change(func(st *model.State) error {
+			if profileForAccount(st, accountID) == "" {
+				return model.Err("IDENTITY_REQUIRED", "提交身份已移除，请重新选择账号")
+			}
+			for i := range st.Bindings {
+				if st.Bindings[i].ID == binding.ID {
+					st.Bindings[i] = binding
+					return nil
+				}
+			}
+			st.Bindings = append(st.Bindings, binding)
+			return nil
+		}); err != nil {
+			return err
+		}
+		helper, err := os.Executable()
+		if err != nil {
+			return err
+		}
+		_ = s.updateTask(taskID, func(t *model.Task) { t.Progress = "正在推送分支到 GitHub" })
+		err = s.progressRunner(taskID).Network(ctx, c.Path, "push", "origin", gitexec.Auth{URL: cloneURL, Login: a.Login, Token: token, Helper: helper})
+		s.markAuthFailure(accountID, err)
+		return err
 	})
 }
 

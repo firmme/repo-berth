@@ -48,12 +48,18 @@ type Repository struct {
 		Push bool `json:"push"`
 	} `json:"permissions"`
 }
+type CreateRepositoryInput struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Private     bool   `json:"private"`
+}
 type Provider interface {
 	StartDevice(context.Context, string) (DeviceCode, error)
 	PollDevice(context.Context, string, DeviceCode) (string, error)
 	CurrentUser(context.Context, string) (User, error)
 	Emails(context.Context, string) ([]Email, error)
 	Repositories(context.Context, string) ([]Repository, error)
+	CreateRepository(context.Context, string, CreateRepositoryInput) (Repository, error)
 }
 type GitHub struct {
 	Client *http.Client
@@ -67,17 +73,29 @@ func NewGitHub() *GitHub {
 }
 func (g *GitHub) request(ctx context.Context, method, endpoint, token string, form url.Values, out any) error {
 	var body io.Reader
+	contentType := ""
 	if form != nil {
 		body = strings.NewReader(form.Encode())
+		contentType = "application/x-www-form-urlencoded"
 	}
+	return g.do(ctx, method, endpoint, token, body, contentType, out)
+}
+func (g *GitHub) requestJSON(ctx context.Context, method, endpoint, token string, payload any, out any) error {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return model.Err("NETWORK", "无法构建请求")
+	}
+	return g.do(ctx, method, endpoint, token, bytes.NewReader(body), "application/json", out)
+}
+func (g *GitHub) do(ctx context.Context, method, endpoint, token string, body io.Reader, contentType string, out any) error {
 	req, err := http.NewRequestWithContext(ctx, method, endpoint, body)
 	if err != nil {
 		return model.Err("NETWORK", "无法构建请求")
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", "Repo-Berth/0.1")
-	if form != nil {
-		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
 	}
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
@@ -100,6 +118,9 @@ func (g *GitHub) request(ctx context.Context, method, endpoint, token string, fo
 	if resp.StatusCode == 403 {
 		return model.Err("PERMISSION", "GitHub 拒绝访问，请检查仓库权限及组织 SSO 授权")
 	}
+	if resp.StatusCode == 422 {
+		return model.Err("INVALID_REQUEST", "GitHub 拒绝了请求，名称可能已存在或不符合规则")
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return model.Err("PROVIDER", "GitHub 返回异常状态 "+strconv.Itoa(resp.StatusCode))
 	}
@@ -110,7 +131,7 @@ func (g *GitHub) request(ctx context.Context, method, endpoint, token string, fo
 }
 func (g *GitHub) StartDevice(ctx context.Context, client string) (DeviceCode, error) {
 	var d DeviceCode
-	err := g.request(ctx, "POST", g.OAuth+"/login/device/code", "", url.Values{"client_id": {client}, "scope": {"repo read:user user:email"}}, &d)
+	err := g.request(ctx, "POST", g.OAuth+"/login/device/code", "", url.Values{"client_id": {client}, "scope": {"repo workflow read:user user:email"}}, &d)
 	if err != nil {
 		return d, err
 	}
@@ -181,6 +202,17 @@ func (g *GitHub) Emails(ctx context.Context, t string) ([]Email, error) {
 	var e []Email
 	err := g.request(ctx, "GET", g.API+"/user/emails", t, nil, &e)
 	return e, err
+}
+func (g *GitHub) CreateRepository(ctx context.Context, t string, in CreateRepositoryInput) (Repository, error) {
+	var repo Repository
+	if strings.TrimSpace(in.Name) == "" {
+		return repo, model.Err("INVALID_NAME", "请输入仓库名称")
+	}
+	err := g.requestJSON(ctx, "POST", g.API+"/user/repos", t, in, &repo)
+	if err == nil && (repo.CloneURL == "" || repo.Owner.Login == "") {
+		err = model.Err("PROVIDER", "GitHub 未返回有效的新仓库信息")
+	}
+	return repo, err
 }
 func (g *GitHub) Repositories(ctx context.Context, t string) ([]Repository, error) {
 	all := []Repository{}
