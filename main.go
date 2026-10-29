@@ -88,6 +88,9 @@ func main() {
 		options.Windows.AdditionalBrowserArgs = []string{fmt.Sprintf("--remote-debugging-port=%d", *debugPort)}
 	}
 	app := application.New(options)
+	if runtime.GOOS == "darwin" {
+		installMacMenu(app, func(name string, data any) { app.Event.Emit(name, data) })
+	}
 	// Acquire the native single-instance lock before touching persisted state.
 	svc, err := service.New(path, provider.NewGitHub(), vault.New())
 	if err != nil {

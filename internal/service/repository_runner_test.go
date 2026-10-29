@@ -30,7 +30,7 @@ func TestRepositoryRunnerUsesConcreteRootsWithoutSeparateConfirmation(t *testing
 	if !found {
 		t.Fatal("selected root missing")
 	}
-	if root, err := runner.Root(context.Background(), nested); err != nil || root != path {
+	if root, err := runner.Root(context.Background(), nested); err != nil || root != canonical {
 		t.Fatalf("nested import root %s %v", root, err)
 	}
 	if err := s.ForgetCheckout(id); err != nil {

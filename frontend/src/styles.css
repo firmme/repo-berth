@@ -66,7 +66,7 @@ button {
 }
 button:hover {
   background: var(--raised);
-  border-color: #a8b2b8;
+  border-color: var(--control-hover);
 }
 button:active {
   transform: translateY(1px);
@@ -756,7 +756,7 @@ button.text-button:hover {
 }
 .pill.neutral {
   background: var(--active);
-  color: #414e55;
+  color: var(--muted);
 }
 .pill.positive {
   background: #e1f3e9;
@@ -836,8 +836,8 @@ button.text-button:hover {
   font-weight: 400;
 }
 .binding-strip {
-  background: #f3f7f8;
-  border: 1px solid #e6edef;
+  background: var(--raised);
+  border: 1px solid var(--border);
   border-radius: 8px;
   padding: 14px 16px;
   margin-bottom: 26px;
@@ -897,7 +897,7 @@ button.text-button:hover {
   overflow-wrap: anywhere;
 }
 .identity-lanes > svg {
-  color: #87969e;
+  color: var(--muted);
 }
 .detail-content section + section {
   margin-top: 28px;
@@ -1005,8 +1005,8 @@ button.text-button:hover {
   gap: 8px;
   padding: 12px 16px;
   font-size: 12px;
-  background: #fff4f3;
-  color: #872a2e;
+  background: color-mix(in srgb, var(--negative) 10%, var(--surface));
+  color: var(--negative);
   line-height: 1.6;
   overflow-wrap: anywhere;
 }
@@ -1323,7 +1323,7 @@ button.text-button:hover {
 }
 .task-row p.task-error {
   font-size: 11px;
-  color: #872a2e;
+  color: var(--negative);
 }
 .task-row-footer {
   display: flex;
@@ -1391,7 +1391,7 @@ button.text-button:hover {
 .diff-view pre {
   margin: 0;
   padding: 14px;
-  background: #f5f7f8;
+  background: var(--raised);
   border-radius: 6px;
   font-size: 11px;
   line-height: 1.8;

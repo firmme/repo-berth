@@ -89,7 +89,13 @@ type MenuNode = {
   action?: () => void;
   disabled?: boolean;
   hidden?: boolean;
-  children?: { label: string; action: () => void; checked?: boolean }[];
+  nativeAction?: string;
+  children?: {
+    label: string;
+    action: () => void;
+    checked?: boolean;
+    nativeAction?: string;
+  }[];
 };
 export default function Desktop() {
   const client = useQueryClient(),
@@ -97,6 +103,8 @@ export default function Desktop() {
   const [popup, setPopup] = useState<Popup>(""),
     [panel, setPanel] = useState<Panel>("");
   const customTitlebar = isDesktop && navigator.userAgent.includes("Windows");
+  const nativeMenubar =
+    isDesktop && /Macintosh|Mac OS X/.test(navigator.userAgent);
   const windowCommand = (command: "Minimise" | "ToggleMaximise" | "Close") => {
     void import("@wailsio/runtime").then(({ Window }) => Window[command]());
   };
@@ -117,6 +125,7 @@ export default function Desktop() {
     [newBranch, setNewBranch] = useState("");
   const [lastFetched, setLastFetched] = useState<Record<string, string>>({});
   const seenTasks = useRef<Set<string> | null>(null);
+  const nativeCommands = useRef<Record<string, () => void>>({});
   const {
     data: st = emptyState,
     isPending: loading,
@@ -232,8 +241,12 @@ export default function Desktop() {
     apply();
     media?.addEventListener("change", apply);
     localStorage.setItem("repo-berth-theme", theme);
+    if (nativeMenubar)
+      void import("@wailsio/runtime").then(({ Events }) =>
+        Events.Emit("menu:theme", theme),
+      );
     return () => media?.removeEventListener("change", apply);
-  }, [theme]);
+  }, [theme, nativeMenubar]);
   useEffect(() => {
     let off = () => {};
     let live = true;
@@ -249,6 +262,23 @@ export default function Desktop() {
       off();
     };
   }, [client]);
+  useEffect(() => {
+    if (!nativeMenubar) return;
+    let off = () => {};
+    let live = true;
+    void import("@wailsio/runtime").then(({ Events }) => {
+      const unsubscribe = Events.On("menu:action", (event) => {
+        const command = typeof event.data === "string" ? event.data : "";
+        nativeCommands.current[command]?.();
+      });
+      if (live) off = unsubscribe;
+      else unsubscribe();
+    });
+    return () => {
+      live = false;
+      off();
+    };
+  }, [nativeMenubar]);
   useEffect(() => {
     useUI.getState().settleCommitDrafts(st.tasks);
     if (!seenTasks.current) {
@@ -361,31 +391,54 @@ export default function Desktop() {
     behind && !ahead ? "pull" : ahead && !behind ? "push" : "fetch";
   const menuItems: Record<string, MenuNode[]> = {
     file: [
-      { label: "添加本地仓库…", action: () => show("import") },
-      { label: "管理本地目录…", action: () => show("local-management") },
+      {
+        label: "添加本地仓库…",
+        nativeAction: "file.import",
+        action: () => show("import"),
+      },
+      {
+        label: "管理本地目录…",
+        nativeAction: "file.manage-local",
+        action: () => show("local-management"),
+      },
       {
         label: "克隆仓库…",
-        action: () => { setCloneRequest(undefined); show("clone-url"); },
+        nativeAction: "file.clone",
+        action: () => {
+          setCloneRequest(undefined);
+          show("clone-url");
+        },
       },
-      { label: "设置…", action: () => show("settings") },
+      {
+        label: "设置…",
+        nativeAction: "app.settings",
+        action: () => show("settings"),
+      },
     ],
     edit: [
       {
         label: "在编辑器中打开",
+        nativeAction: "edit.open-editor",
         disabled: !checkout,
-        action: () =>
-          void execute(() => api("OpenCheckout", checkout!.id, "editor")),
+        action: () => {
+          if (checkout)
+            void execute(() => api("OpenCheckout", checkout.id, "editor"));
+        },
       },
       {
         label: "复制本地路径",
+        nativeAction: "edit.copy-path",
         disabled: !checkout,
-        action: () =>
-          void execute(() => navigator.clipboard.writeText(checkout!.path)),
+        action: () => {
+          if (checkout)
+            void execute(() => navigator.clipboard.writeText(checkout.path));
+        },
       },
     ],
     view: [
       {
         label: "变更",
+        nativeAction: "view.changes",
         action: () => {
           setTab("changes");
           setPopup("");
@@ -393,6 +446,7 @@ export default function Desktop() {
       },
       {
         label: "历史",
+        nativeAction: "view.history",
         action: () => {
           setTab("history");
           setPopup("");
@@ -400,14 +454,17 @@ export default function Desktop() {
       },
       {
         label: "刷新仓库状态",
+        nativeAction: "view.refresh",
         disabled: !checkout,
         action: () => {
+          if (!checkout) return;
           void status.refetch();
           setPopup("");
         },
       },
       {
         label: "任务中心",
+        nativeAction: "view.tasks",
         action: () => {
           ui.set({ tasksOpen: true });
           setPopup("");
@@ -418,16 +475,19 @@ export default function Desktop() {
         children: [
           {
             label: "跟随系统",
+            nativeAction: "view.theme.system",
             checked: theme === "system",
             action: () => setTheme("system"),
           },
           {
             label: "日间",
+            nativeAction: "view.theme.light",
             checked: theme === "light",
             action: () => setTheme("light"),
           },
           {
             label: "暗黑",
+            nativeAction: "view.theme.dark",
             checked: theme === "dark",
             action: () => setTheme("dark"),
           },
@@ -437,12 +497,16 @@ export default function Desktop() {
     repository: [
       {
         label: "在文件夹中打开",
+        nativeAction: "repository.open-folder",
         disabled: !checkout,
-        action: () =>
-          void execute(() => api("OpenCheckout", checkout!.id, "folder")),
+        action: () => {
+          if (checkout)
+            void execute(() => api("OpenCheckout", checkout.id, "folder"));
+        },
       },
       {
         label: "在 GitHub 中查看",
+        nativeAction: "repository.open-github",
         disabled: !(checkout && githubPath) && !selected?.repository,
         action: () => {
           if (checkout && githubPath)
@@ -455,27 +519,57 @@ export default function Desktop() {
       },
       {
         label: "分享到 GitHub…",
+        nativeAction: "repository.share",
         hidden: remotes.some((r) => /github\.com/i.test(r.url)),
         disabled:
           !checkout || !!checkout.plainDirectory || !st.accounts.length,
-        action: () => show("share"),
+        action: () => {
+          if (checkout && !checkout.plainDirectory && st.accounts.length)
+            show("share");
+        },
       },
       {
         label: "仓库设置…",
+        nativeAction: "repository.settings",
         disabled: !checkout,
-        action: () => show("repository"),
+        action: () => {
+          if (checkout) show("repository");
+        },
       },
       {
         label: selected?.favorite ? "取消收藏" : "收藏仓库",
+        nativeAction: "repository.favorite",
         disabled: !selected,
-        action: () => void execute(() => api("ToggleFavorite", selected!.id)),
+        action: () => {
+          if (selected)
+            void execute(() => api("ToggleFavorite", selected.id));
+        },
       },
     ],
     help: [
-      { label: "账号与身份…", action: () => show("accounts") },
-      { label: "关于 Repo Berth", action: () => show("about") },
+      {
+        label: "账号与身份…",
+        nativeAction: "help.accounts",
+        action: () => show("accounts"),
+      },
+      {
+        label: "关于 Repo Berth",
+        nativeAction: "help.about",
+        action: () => show("about"),
+      },
     ],
   };
+  const commands: Record<string, () => void> = {
+    "branch.switch": () => setPopup("branch"),
+  };
+  for (const items of Object.values(menuItems))
+    for (const item of items) {
+      if (item.nativeAction && item.action)
+        commands[item.nativeAction] = item.action;
+      for (const child of item.children ?? [])
+        if (child.nativeAction) commands[child.nativeAction] = child.action;
+    }
+  nativeCommands.current = commands;
   const filtered = filterRows(rows, ui.scope, repositorySearch, "", "all", st);
   const popupButton = (
     name: Popup,
@@ -559,7 +653,7 @@ export default function Desktop() {
     </div>
   );
   return (
-    <div className={`desktop-shell${customTitlebar ? " custom-titlebar" : ""}`}>
+    <div className={`desktop-shell${customTitlebar ? " custom-titlebar" : ""}${nativeMenubar ? " native-menubar" : ""}`}>
       <nav className="desktop-menubar" aria-label="应用菜单">
         <img src="/app-icon.svg" alt="" width="17" height="17" />
         <span className="desktop-app-name">Repo Berth</span>
