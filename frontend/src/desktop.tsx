@@ -670,7 +670,7 @@ export default function Desktop() {
   return (
     <div className={`desktop-shell${customTitlebar ? " custom-titlebar" : ""}${nativeMenubar ? " native-menubar" : ""}`}>
       <nav className="desktop-menubar" aria-label="应用菜单">
-        <img src="/app-icon.svg" alt="" width="17" height="17" />
+        <img src="/app-icon.png" alt="" width="17" height="17" />
         <span className="desktop-app-name">Repo Berth</span>
         {[
           ["file", "文件"],
@@ -1200,7 +1200,7 @@ export default function Desktop() {
       {panel === "about" && (
         <Modal title="关于 Repo Berth" onClose={closePanel}>
           <div className="desktop-about">
-            <img src="/app-icon.svg" width="64" height="64" alt="" />
+            <img src="/app-icon.png" width="64" height="64" alt="" />
             <h2>Repo Berth {version}</h2>
             <p>熟悉的 Git 工作流，独立的多账号身份。</p>
             <p>账号凭据保存在本设备的系统凭据库。</p>

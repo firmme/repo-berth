@@ -1,28 +1,52 @@
-"""Regenerate the original vector mark and platform icons (requires Pillow)."""
+"""Regenerate Repo Berth platform icons from the 1024px master artwork."""
 from pathlib import Path
-from PIL import Image, ImageDraw
+from PIL import Image
 
 root = Path(__file__).resolve().parent.parent
 assets = root / 'assets'
-assets.mkdir(exist_ok=True)
-svg = '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="#173740"/><g fill="none" stroke="#e1f0e9" stroke-width="24" stroke-linecap="round" stroke-linejoin="round"><path d="M152 144v162c0 64 40 96 96 96s96-32 96-96V144M152 242h192M344 306h56"/></g><circle cx="152" cy="144" r="31" fill="#8edbc7"/><circle cx="344" cy="144" r="31" fill="#f2d9a6"/></svg>'''
-(assets / 'app-icon.svg').write_text(svg, encoding='utf-8')
+source = assets / 'app-icon-source.png'
+if not source.exists():
+    source = root / 'icon-new.png'
+
+image = Image.open(source).convert('RGBA')
+alpha = image.getchannel('A').point(lambda p: 255 if p >= 32 else 0)
+bbox = alpha.getbbox()
+if not bbox:
+    raise SystemExit('Icon source has no visible pixels')
+
+left, top, right, bottom = bbox
+side = max(right - left, bottom - top)
+center_x, center_y = (left + right) / 2, (top + bottom) / 2
+image = image.crop(
+    (
+        round(center_x - side / 2),
+        round(center_y - side / 2),
+        round(center_x + side / 2),
+        round(center_y + side / 2),
+    )
+)
+master = image.resize((1024, 1024), Image.Resampling.LANCZOS)
+
+
+def platform_icon(size):
+    """Center the artwork on the standard macOS icon grid: 87.5% content."""
+    canvas = Image.new('RGBA', (size, size), (0, 0, 0, 0))
+    content = round(size * 0.875)
+    art = master.resize((content, content), Image.Resampling.LANCZOS)
+    offset = (size - content) // 2
+    canvas.alpha_composite(art, (offset, offset))
+    return canvas
+
+
+platform_icon(1024).save(assets / 'app.icns')
+platform_icon(512).save(assets / 'app-icon.png')
+platform_icon(128).save(assets / 'app-icon-preview.png')
+platform_icon(1024).save(
+    assets / 'app.ico',
+    sizes=[(s, s) for s in [16, 20, 24, 32, 40, 48, 64, 128, 256]],
+)
 (root / 'frontend/public').mkdir(exist_ok=True)
-(root / 'frontend/public/app-icon.svg').write_text(svg, encoding='utf-8')
-scale=4
-image=Image.new('RGBA',(512*scale,512*scale))
-draw=ImageDraw.Draw(image)
-draw.rounded_rectangle((0,0,512*scale-1,512*scale-1),radius=112*scale,fill='#173740')
-def cubic(a,b,c,d):
-    return [tuple((1-t)**3*a[k]+3*(1-t)**2*t*b[k]+3*(1-t)*t*t*c[k]+t**3*d[k] for k in (0,1)) for t in [i/80 for i in range(81)]]
-points=[(152,144),(152,306)]+cubic((152,306),(152,370),(192,402),(248,402))+cubic((248,402),(304,402),(344,370),(344,306))+[(344,144)]
-for line in [points,[(152,242),(344,242)],[(344,306),(400,306)]]:
-    draw.line([(round(x*scale),round(y*scale)) for x,y in line],fill='#e1f0e9',width=24*scale,joint='curve')
-    for x,y in [line[0],line[-1]]:draw.ellipse(((x-12)*scale,(y-12)*scale,(x+12)*scale,(y+12)*scale),fill='#e1f0e9')
-for x,color in [(152,'#8edbc7'),(344,'#f2d9a6')]:
-    draw.ellipse(((x-31)*scale,113*scale,(x+31)*scale,175*scale),fill=color)
-image=image.resize((1024,1024),Image.Resampling.LANCZOS)
-image.save(assets/'app.icns')
-image.resize((512,512),Image.Resampling.LANCZOS).save(assets/'app-icon.png')
-image.save(assets/'app.ico',sizes=[(s,s) for s in [16,20,24,32,40,48,64,128,256]])
-print('Generated SVG, PNG, multi-size ICO and ICNS')
+master.resize((512, 512), Image.Resampling.LANCZOS).save(
+    root / 'frontend/public/app-icon.png'
+)
+print('Generated PNG, multi-size ICO and ICNS')
