@@ -91,6 +91,7 @@ export interface Settings {
   gitPath: string;
   cloneDirectory: string;
   editorPath: string;
+  autoUpdateDisabled: boolean;
 }
 export interface State {
   githubAuthConfigured?: boolean;
@@ -174,5 +175,6 @@ export const emptyState: State = {
     gitPath: "git",
     cloneDirectory: "",
     editorPath: "",
+    autoUpdateDisabled: false,
   },
 };

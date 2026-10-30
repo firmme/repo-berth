@@ -22,3 +22,10 @@ func (s *Service) CheckForUpdates() error {
 	check()
 	return nil
 }
+
+// AutoUpdateEnabled reports whether the user allows the startup update check.
+func (s *Service) AutoUpdateEnabled() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return !s.state.Settings.AutoUpdateDisabled
+}

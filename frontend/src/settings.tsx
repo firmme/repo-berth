@@ -584,6 +584,27 @@ export function SettingsView({ st, execute }: { st: State; execute: Execute }) {
             </Field>
           </div>
         </section>
+        <section className="settings-row">
+          <div>
+            <h2>应用更新</h2>
+            <p>启动后自动检查 GitHub Releases；关闭后仍可从“更新 → 检查更新…”手动检查。</p>
+          </div>
+          <div className="settings-panel">
+            <label className="checkbox-label">
+              <input
+                type="checkbox"
+                checked={!settings.autoUpdateDisabled}
+                onChange={(e) =>
+                  setSettings({
+                    ...settings,
+                    autoUpdateDisabled: !e.target.checked,
+                  })
+                }
+              />
+              启动时自动检查更新
+            </label>
+          </div>
+        </section>
         <div className="settings-save">
           <span>{saved ? "设置已保存" : ""}</span>
           <button className="primary">

@@ -137,6 +137,7 @@ type Settings struct {
 	GitPath            string `json:"gitPath"`
 	CloneDirectory     string `json:"cloneDirectory"`
 	EditorPath         string `json:"editorPath"`
+	AutoUpdateDisabled bool   `json:"autoUpdateDisabled"`
 }
 type State struct {
 	GitHubAuthConfigured          bool                `json:"githubAuthConfigured"`

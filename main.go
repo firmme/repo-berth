@@ -102,6 +102,9 @@ func main() {
 	service.Attach(svc, desktop{app}, func(name string, data any) { app.Event.Emit(name, data) })
 	if updaterReady {
 		service.AttachUpdater(svc, func() { startUpdateCheck(app) })
+		if svc.AutoUpdateEnabled() {
+			go automaticUpdateCheck(app)
+		}
 	}
 	app.Window.NewWithOptions(application.WebviewWindowOptions{Title: "Repo Berth · 仓库工作台", Width: 1440, Height: 920, MinWidth: 900, MinHeight: 640, Frameless: runtime.GOOS == "windows", URL: "/"})
 	app.OnShutdown(func() { service.Close(svc) })

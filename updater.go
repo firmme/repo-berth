@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
-	"github.com/wailsapp/wails/v3/pkg/events"
 	"github.com/wailsapp/wails/v3/pkg/updater"
 	"github.com/wailsapp/wails/v3/pkg/updater/providers/github"
 )
@@ -58,9 +57,6 @@ func configureUpdater(app *application.App) bool {
 		log.Printf("自动更新初始化失败：%v", err)
 		return false
 	}
-	app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
-		go automaticUpdateCheck(app)
-	})
 	return true
 }
 
