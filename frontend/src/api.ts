@@ -102,6 +102,7 @@ interface Methods {
   SwitchBranch: (id: string, name: string, create: boolean) => string;
   GitNetwork: (id: string, remote: string, operation: string) => string;
   CancelTask: (id: string) => void;
+  CheckForUpdates: () => void;
 }
 export async function api<K extends keyof Methods>(
   name: K,

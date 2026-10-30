@@ -87,6 +87,7 @@ if (process.platform === "win32") {
 }
 const flags =
   (process.platform === "win32" ? "-s -w -H=windowsgui" : "-s -w") +
+  ` -X main.appVersion=${appVersion}` +
   (clientId
     ? ` -X repo-berth/internal/service.GitHubOAuthClientID=${clientId}`
     : "");

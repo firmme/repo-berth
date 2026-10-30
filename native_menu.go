@@ -82,6 +82,9 @@ func installMacMenu(app *application.App, emit func(string, any)) {
 	branch := menu.AddSubmenu("分支")
 	branch.Add("切换或新建分支…").SetAccelerator("CmdOrCtrl+B").OnClick(action("branch.switch"))
 
+	update := menu.AddSubmenu("更新")
+	update.Add("检查更新…").SetAccelerator("CmdOrCtrl+Shift+U").OnClick(action("update.check"))
+
 	window := menu.AddSubmenu("窗口")
 	role(window, application.Minimise, "最小化", "CmdOrCtrl+M")
 	role(window, application.Zoom, "缩放", "")

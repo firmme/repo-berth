@@ -88,6 +88,7 @@ func main() {
 		options.Windows.AdditionalBrowserArgs = []string{fmt.Sprintf("--remote-debugging-port=%d", *debugPort)}
 	}
 	app := application.New(options)
+	updaterReady := configureUpdater(app)
 	if runtime.GOOS == "darwin" {
 		installMacMenu(app, func(name string, data any) { app.Event.Emit(name, data) })
 	}
@@ -99,6 +100,9 @@ func main() {
 	}
 	app.RegisterService(application.NewService(svc))
 	service.Attach(svc, desktop{app}, func(name string, data any) { app.Event.Emit(name, data) })
+	if updaterReady {
+		service.AttachUpdater(svc, func() { startUpdateCheck(app) })
+	}
 	app.Window.NewWithOptions(application.WebviewWindowOptions{Title: "Repo Berth · 仓库工作台", Width: 1440, Height: 920, MinWidth: 900, MinHeight: 640, Frameless: runtime.GOOS == "windows", URL: "/"})
 	app.OnShutdown(func() { service.Close(svc) })
 	if err = app.Run(); err != nil {

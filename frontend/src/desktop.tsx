@@ -77,6 +77,7 @@ type Popup =
   | "view"
   | "repository"
   | "branch"
+  | "update"
   | "help";
 type Panel =
   | ""
@@ -553,6 +554,13 @@ export default function Desktop() {
         },
       },
     ],
+    update: [
+      {
+        label: "检查更新…",
+        nativeAction: "update.check",
+        action: () => void execute(() => api("CheckForUpdates")),
+      },
+    ],
     help: [
       {
         label: "账号与身份…",
@@ -670,10 +678,11 @@ export default function Desktop() {
           ["view", "视图"],
           ["repository", "仓库"],
           ["branch", "分支"],
+          ["update", "更新"],
           ["help", "帮助"],
         ].map(([id, label]) => (
           <div data-desktop-popup key={id} onMouseEnter={() => {
-            if (["file", "edit", "view", "repository", "branch", "help"].includes(popup)) setPopup(id as Popup);
+            if (["file", "edit", "view", "repository", "branch", "update", "help"].includes(popup)) setPopup(id as Popup);
           }}>
             {popupButton(id as Popup, label)}
             {popup === id &&

@@ -43,6 +43,7 @@ type Service struct {
 	inflightCredentials   map[string]bool
 	desktop               Desktop
 	emit                  func(string, any)
+	checkUpdates          func()
 }
 
 func New(path string, p provider.Provider, v vault.Vault) (*Service, error) {
