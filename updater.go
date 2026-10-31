@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
+	"github.com/wailsapp/wails/v3/pkg/events"
 	"github.com/wailsapp/wails/v3/pkg/updater"
 	"github.com/wailsapp/wails/v3/pkg/updater/providers/github"
 )
@@ -24,7 +25,44 @@ var (
 	appVersion      = "dev"
 	versionPattern  = regexp.MustCompile(`^\d+\.\d+\.\d+([.-][0-9A-Za-z.-]+)?$`)
 	updateFlowMutex sync.Mutex
+	autoCheckMutex  sync.Mutex
+	lastAutoCheck   time.Time
 )
+
+const autoCheckCooldown = 10 * time.Second
+
+const updaterWindowCSS = `
+.u__btn { color: var(--fg); }
+.u__btn--primary {
+  background: #0969da;
+  border-color: #0969da;
+  color: #fff;
+}
+.u__btn--primary:hover:not(:disabled) {
+  background: #0755b4;
+  filter: none;
+}
+.u__btn--primary:disabled { color: rgba(255, 255, 255, 0.8); }
+.u__btn--primary:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+@media (prefers-color-scheme: dark) {
+  .u__btn {
+    background: #25313e;
+    border-color: #536578;
+    color: #e9f1f8;
+  }
+  .u__btn:hover:not(:disabled) { background: #2f4255; }
+  .u__btn--ghost { color: #b9cad9; }
+  .u__btn--primary {
+    background: #2686e5;
+    border-color: #2686e5;
+    color: #fff;
+  }
+  .u__btn--primary:hover:not(:disabled) { background: #409af3; }
+}
+`
 
 // configureUpdater wires GitHub Releases-based self-updates. It returns false
 // for development builds, where no release version was injected.
@@ -52,6 +90,7 @@ func configureUpdater(app *application.App) bool {
 		Providers:      []updater.Provider{provider},
 		Window: &updater.BuiltinWindow{
 			Options: updater.WindowOptions{Title: "检查更新"},
+			CSS:     updaterWindowCSS,
 		},
 	}); err != nil {
 		log.Printf("自动更新初始化失败：%v", err)
@@ -60,10 +99,23 @@ func configureUpdater(app *application.App) bool {
 	return true
 }
 
-// automaticUpdateCheck looks for a newer release after startup and opens the
-// update flow only when one exists. Up-to-date startup checks stay silent.
+// attachAutoUpdateTrigger checks for a new application release after startup.
+// Repository remote checks are handled by the workbench UI.
+func attachAutoUpdateTrigger(app *application.App, enabled func() bool) {
+	app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
+		if enabled == nil || !enabled() {
+			return
+		}
+		go automaticUpdateCheck(app)
+	})
+}
+
+// automaticUpdateCheck looks for a newer release and opens the update flow
+// only when one exists. Up-to-date checks stay silent.
 func automaticUpdateCheck(app *application.App) {
-	time.Sleep(5 * time.Second)
+	if !beginAutomaticCheck() {
+		return
+	}
 	if !beginUpdateFlow(app) {
 		return
 	}
@@ -79,6 +131,16 @@ func automaticUpdateCheck(app *application.App) {
 		return
 	}
 	runUpdateFlow(app)
+}
+
+func beginAutomaticCheck() bool {
+	autoCheckMutex.Lock()
+	defer autoCheckMutex.Unlock()
+	if time.Since(lastAutoCheck) < autoCheckCooldown {
+		return false
+	}
+	lastAutoCheck = time.Now()
+	return true
 }
 
 // startUpdateCheck is the manual menu entry point.

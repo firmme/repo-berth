@@ -1,11 +1,9 @@
 package service
 
 import (
-	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
-	"unicode/utf8"
 
 	"repo-berth/internal/gitexec"
 	"repo-berth/internal/model"
@@ -49,10 +47,11 @@ func (s *Service) GitFileContent(id, file string) (string, error) {
 	if err != nil {
 		return "", model.Err("READ_FAILED", "无法读取文件，请检查权限")
 	}
-	if bytes.IndexByte(content, 0) >= 0 || !utf8.Valid(content) {
+	text, _, binaryFile := decodeText(content)
+	if binaryFile {
 		return "", model.Err("BINARY_FILE", "二进制文件不支持应用内编辑")
 	}
-	return string(content), nil
+	return text, nil
 }
 
 func (s *Service) SaveWorkingFile(id, file, content string) error {
@@ -82,14 +81,22 @@ func (s *Service) SaveWorkingFile(id, file, content string) error {
 	} else if !os.IsNotExist(err) {
 		return model.Err("WRITE_FAILED", "无法访问文件，请检查权限")
 	}
-	if existing, err := os.ReadFile(full); err == nil && bytes.Contains(existing, []byte("\r\n")) {
-		content = strings.ReplaceAll(
-			strings.ReplaceAll(content, "\r\n", "\n"),
-			"\n",
-			"\r\n",
-		)
+	encoding, lineEnding := "UTF-8", "LF"
+	if existing, readErr := os.ReadFile(full); readErr == nil {
+		text, detected, binaryFile := decodeText(existing)
+		if !binaryFile {
+			encoding = detected
+			lineEnding = detectLineEnding(text)
+			if lineEnding == "Mixed" || lineEnding == "None" {
+				lineEnding = "LF"
+			}
+		}
 	}
-	if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+	payload, err := encodeText(content, encoding, lineEnding)
+	if err != nil {
+		return model.Err("WRITE_FAILED", "无法保存文件，请检查权限")
+	}
+	if err := os.WriteFile(full, payload, 0o644); err != nil {
 		return model.Err("WRITE_FAILED", "无法保存文件，请检查权限")
 	}
 	return nil

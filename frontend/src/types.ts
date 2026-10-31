@@ -133,7 +133,40 @@ export interface RemoteTracking {
   branch: string;
   ahead: number;
   behind: number;
-}export interface FileEntry {
+}export interface RemoteCheck {
+  remote: string;
+  branch: string;
+  head: string;
+  tracking: string;
+  updated: boolean;
+}
+export interface LineEndingRisk {
+  path: string;
+  crlf: number;
+  lf: number;
+  mixed: boolean;
+  policy: string;
+}
+export interface WorkingFileInfo {
+  path: string;
+  name: string;
+  size: number;
+  isDir: boolean;
+  binary: boolean;
+  encoding: string;
+  lineEnding: string;
+  mimeType: string;
+  previewKind: "text" | "image" | "audio" | "video" | "unsupported" | "directory";
+  editable: boolean;
+  tooLarge: boolean;
+}
+export interface WorkingFilePreview {
+  kind: "image" | "audio" | "video";
+  mimeType: string;
+  data: string;
+  size: number;
+}
+export interface FileEntry {
   path: string;
   tracked: boolean;
 }

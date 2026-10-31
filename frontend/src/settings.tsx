@@ -587,7 +587,6 @@ export function SettingsView({ st, execute }: { st: State; execute: Execute }) {
         <section className="settings-row">
           <div>
             <h2>应用更新</h2>
-            <p>启动后自动检查 GitHub Releases；关闭后仍可从“更新 → 检查更新…”手动检查。</p>
           </div>
           <div className="settings-panel">
             <label className="checkbox-label">

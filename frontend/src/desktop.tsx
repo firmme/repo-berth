@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode, type MouseEvent as ReactMouseEvent } from "react";
+import { createPortal } from "react-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ChevronDown,
@@ -32,10 +33,19 @@ import {
   EyeOff,
   Trash2,
   Copy,
+  Scissors,
+  ClipboardPaste,
+  FolderPlus,
+  Terminal,
+  Image as ImageIcon,
+  Music,
+  Video,
+  FileQuestion,
+  Eye,
   Save,
 } from "lucide-react";
 import { version } from "../package.json";
-import { api, errorMessage, isDesktop, onStateChanged } from "./api";
+import { api, errorMessage, isDesktop, onAppActivated, onStateChanged } from "./api";
 import {
   emptyState,
   type State,
@@ -43,6 +53,10 @@ import {
   type FileStatus,
   type GitStatus,
   type Task,
+  type RemoteCheck,
+  type LineEndingRisk,
+  type WorkingFileInfo,
+  type WorkingFilePreview,
 } from "./types";
 import { rowsFromState, filterRows, type Execute, type Row } from "./catalog";
 import { useUI } from "./ui";
@@ -117,7 +131,10 @@ export default function Desktop() {
     void import("@wailsio/runtime").then(({ Window }) => Window[command]());
   };
   const [copyID, setCopyID] = useState(""),
-    [remoteChoices, setRemoteChoices] = useState<Record<string, string>>({});
+    [remoteChoices, setRemoteChoices] = useState<Record<string, string>>({}),
+    [remoteCheck, setRemoteCheck] = useState<RemoteCheck>();
+  const remoteCheckTimes = useRef<Record<string, number>>({});
+  const checkRemoteUpdateRef = useRef<() => void>(() => {});
   const [cloneID, setCloneID] = useState(""),
     [cloneRequest, setCloneRequest] = useState<Task["cloneRequest"]>();
   const [theme, setTheme] = useState<"system" | "light" | "dark">(() => {
@@ -227,6 +244,55 @@ export default function Desktop() {
     account.status === "auth_required" ||
     busy ||
     verifying;
+  const remoteHasUpdates =
+    !!remoteCheck?.updated && remoteCheck.remote === remote;
+  checkRemoteUpdateRef.current = () => {
+    if (
+      !isDesktop ||
+      !checkout ||
+      checkout.plainDirectory ||
+      !remote ||
+      busy ||
+      status.isError
+    )
+      return;
+    if (account?.status === "auth_required") return;
+    const key = `${checkout.id}:${remote}`;
+    const now = Date.now();
+    if ((remoteCheckTimes.current[key] || 0) + 10000 > now) return;
+    remoteCheckTimes.current[key] = now;
+    void api("CheckRemoteUpdate", checkout.id, remote)
+      .then((result) => {
+        if (!result) return;
+        setRemoteCheck((current) =>
+          result.remote === remote ? result : current,
+        );
+      })
+      .catch(() => {});
+  };
+  useEffect(() => {
+    let off = () => {};
+    let live = true;
+    void onAppActivated(() => checkRemoteUpdateRef.current()).then(
+      (dispose) => {
+        if (live) off = dispose;
+        else dispose();
+      },
+    );
+    return () => {
+      live = false;
+      off();
+    };
+  }, []);
+  useEffect(() => {
+    if (!loading) checkRemoteUpdateRef.current();
+  }, [loading, checkout?.id, remote, busy]);
+  useEffect(() => {
+    setRemoteCheck(undefined);
+  }, [checkout?.id, remote]);
+  useEffect(() => {
+    setRemoteCheck(undefined);
+  }, [lastFetch]);
   const activeTasks = st.tasks.filter((t) =>
     ["queued", "running"].includes(t.state),
   );
@@ -504,7 +570,16 @@ export default function Desktop() {
     ],
     repository: [
       {
-        label: "在文件夹中打开",
+        label: "使用 VS Code 打开项目",
+        nativeAction: "repository.open-vscode",
+        disabled: !checkout,
+        action: () => {
+          if (checkout)
+            void execute(() => api("OpenCheckout", checkout.id, "vscode"));
+        },
+      },
+      {
+        label: "在文件管理器中打开",
         nativeAction: "repository.open-folder",
         disabled: !checkout,
         action: () => {
@@ -813,9 +888,17 @@ export default function Desktop() {
                     )}
                   </span>
                 )}
+                {remoteHasUpdates && (
+                  <span
+                    className="remote-update-dot"
+                    title="远端有新提交，可 Fetch 查看"
+                  />
+                )}
               </span>
               {busy ? (
                 <small>执行中…</small>
+              ) : remoteHasUpdates ? (
+                <small>远端有新提交</small>
               ) : lastFetch ? (
                 <small>
                   上次获取{" "}
@@ -1129,7 +1212,7 @@ export default function Desktop() {
         </div>
       )}
       <footer className="desktop-statusbar">
-        <span>
+        <span className="desktop-env-status">
           {version}
           {!isDesktop
             ? " · 浏览器预览"
@@ -1139,6 +1222,7 @@ export default function Desktop() {
                 ? " · Git 已就绪"
                 : " · 正在检测 Git"}
         </span>
+        <div id="desktop-filebar-slot" className="desktop-filebar-slot" />
         <button onClick={() => show("settings")}>
           <Settings2 size={13} />
           设置
@@ -1455,9 +1539,24 @@ function Worktree({
     [cursorLine, setCursorLine] = useState(1),
     [newFileOpen, setNewFileOpen] = useState(false),
     [newFileName, setNewFileName] = useState(""),
-    [newFileError, setNewFileError] = useState("");
+    [newFileError, setNewFileError] = useState(""),
+    [newItemKind, setNewItemKind] = useState<"file" | "dir">("file"),
+    [treeSelected, setTreeSelected] = useState(""),
+    [clipboard, setClipboard] = useState<{ path: string; cut: boolean }>(),
+    [previewPath, setPreviewPath] = useState(""),
+    [renameTarget, setRenameTarget] = useState<FileTreeNode>(),
+    [renameName, setRenameName] = useState(""),
+    [renameError, setRenameError] = useState(""),
+    [fileBarSlot, setFileBarSlot] = useState<HTMLElement | null>(null),
+    [formatBusy, setFormatBusy] = useState(false),
+    [lineEndingRisks, setLineEndingRisks] = useState<LineEndingRisk[]>(),
+    [lineEndingBusy, setLineEndingBusy] = useState(false),
+    [lineEndingError, setLineEndingError] = useState("");
   const editorRef = useRef<HTMLTextAreaElement>(null);
   const gutterRef = useRef<HTMLPreElement>(null);
+  useEffect(() => {
+    setFileBarSlot(document.getElementById("desktop-filebar-slot"));
+  }, []);
   useEffect(() => {
     if (!menu) return;
     const close = (event: PointerEvent) => {
@@ -1531,7 +1630,23 @@ function Worktree({
   const filtered = sourceFiles.filter((f) =>
     f.path.toLowerCase().includes(filter.toLowerCase()),
   );
-  const tree = useMemo(() => buildFileTree(filtered), [filtered]);
+  const tree = useMemo(
+    () =>
+      buildFileTree(
+        filtered,
+        fileView === "all" ? { name: c.name, path: "" } : undefined,
+      ),
+    [filtered, fileView, c.name],
+  );
+  const selectedNode = useMemo(
+    () => findTreeNode(tree, treeSelected),
+    [tree, treeSelected],
+  );
+  const createBase = selectedNode
+    ? selectedNode.isDir
+      ? selectedNode.path
+      : parentPath(selectedNode.path)
+    : "";
   const confirmDiscard = () =>
     !editing ||
     editorText === editorOriginal ||
@@ -1539,6 +1654,8 @@ function Worktree({
   const selectFile = (f: FileStatus) => {
     if (!confirmDiscard()) return;
     setEditing("");
+    setPreviewPath("");
+    setTreeSelected(f.path);
     setSelected({
       path: f.path,
       staged: hasStaged(f) && !hasUnstaged(f),
@@ -1548,6 +1665,27 @@ function Worktree({
     if (!confirmDiscard()) return;
     setEditing("");
     setEditorError("");
+  };
+  const openPreview = (path: string) => {
+    if (!confirmDiscard()) return;
+    setEditing("");
+    setSelected(undefined);
+    setPreviewPath(path);
+    setTreeSelected(path);
+  };
+  const activateFile = async (item: FileStatus) => {
+    setTreeSelected(item.path);
+    if (isChanged(item)) {
+      selectFile(item);
+      return;
+    }
+    try {
+      const info = await api("InspectWorkingFile", c.id, item.path);
+      if (info.previewKind === "text" && info.editable) await openEditor(item.path);
+      else openPreview(item.path);
+    } catch {
+      await openEditor(item.path);
+    }
   };
   const openEditor = async (path: string) => {
     setMenu(undefined);
@@ -1561,6 +1699,8 @@ function Worktree({
       setEditorOriginal(content);
       setCursorLine(1);
       setEditing(path);
+      setPreviewPath("");
+      setTreeSelected(path);
       const target = files.find((item) => item.path === path);
       if (target)
         setSelected({
@@ -1570,8 +1710,13 @@ function Worktree({
     } catch (e) {
       setEditorText("");
       setEditorOriginal("");
-      setEditing(path);
       setEditorError(errorMessage(e));
+      if (errorMessage(e).includes("二进制")) {
+        setEditing("");
+        openPreview(path);
+      } else {
+        setEditing(path);
+      }
     } finally {
       setEditorLoading(false);
     }
@@ -1591,24 +1736,103 @@ function Worktree({
       setEditorSaving(false);
     }
   };
+  const refreshWorkingTree = async () => {
+    await client.invalidateQueries({ queryKey: ["git", "status", c.id] });
+    await client.invalidateQueries({ queryKey: ["git", "files", c.id] });
+    await client.invalidateQueries({ queryKey: ["git", "diff", c.id] });
+    await client.invalidateQueries({ queryKey: ["git", "file-info", c.id] });
+  };
+  const startCreate = (base: string, kind: "file" | "dir") => {
+    setMenu(undefined);
+    setNewItemKind(kind);
+    setNewFileName(base ? base.replace(/\/+$/, "") + "/" : "");
+    setNewFileError("");
+    setNewFileOpen(true);
+  };
   const createFile = async () => {
     const name = newFileName.trim().replace(/^\/+/, "");
     if (!name) return;
     setNewFileError("");
     try {
-      await api("CreateWorkingFile", c.id, name);
+      if (newItemKind === "dir")
+        await api("CreateWorkingDirectory", c.id, name);
+      else await api("CreateWorkingFile", c.id, name);
       setNewFileOpen(false);
       setNewFileName("");
-      await client.invalidateQueries({ queryKey: ["git", "status", c.id] });
-      await client.invalidateQueries({ queryKey: ["git", "files", c.id] });
-      await openEditor(name);
+      await refreshWorkingTree();
+      setTreeSelected(name);
+      if (newItemKind === "file") await openEditor(name);
+      else {
+        setChangesCollapsed((old) => {
+          const next = new Set(old);
+          next.delete("");
+          const parts = name.split("/");
+          for (let index = 1; index < parts.length; index++)
+            next.delete(parts.slice(0, index).join("/"));
+          return next;
+        });
+      }
     } catch (e) {
       setNewFileError(errorMessage(e));
     }
   };
+  const renameEntry = async () => {
+    if (!renameTarget) return;
+    setRenameError("");
+    try {
+      await api("RenameWorkingPath", c.id, renameTarget.path, renameName);
+      const parent = renameTarget.path.includes("/")
+        ? renameTarget.path.slice(0, renameTarget.path.lastIndexOf("/"))
+        : "";
+      const nextPath = parent ? `${parent}/${renameName}` : renameName;
+      if (treeSelected === renameTarget.path) setTreeSelected(nextPath);
+      if (previewPath === renameTarget.path) setPreviewPath(nextPath);
+      if (editing === renameTarget.path) setEditing(nextPath);
+      setSelected((old) =>
+        old?.path === renameTarget.path ? { ...old, path: nextPath } : old,
+      );
+      setRenameTarget(undefined);
+      await refreshWorkingTree();
+    } catch (e) {
+      setRenameError(errorMessage(e));
+    }
+  };
+  const removeEntry = (node: FileTreeNode) => {
+    if (!window.confirm(`确定删除 ${node.path}？此操作不可撤销。`)) return;
+    setMenu(undefined);
+    const affected = (path: string) =>
+      path === node.path || (node.isDir && path.startsWith(node.path + "/"));
+    void execute(async () => {
+      await api("DeleteWorkingPath", c.id, node.path);
+      if (affected(treeSelected)) setTreeSelected("");
+      if (affected(previewPath)) setPreviewPath("");
+      if (affected(editing)) setEditing("");
+      if (selected && affected(selected.path)) setSelected(undefined);
+      await refreshWorkingTree();
+    });
+  };
+  const copyEntry = (node: FileTreeNode, cut: boolean) => {
+    setClipboard({ path: node.path, cut });
+    setMenu(undefined);
+  };
+  const pasteInto = (node: FileTreeNode) => {
+    if (!clipboard) return;
+    const destination = node.isDir
+      ? node.path
+      : node.path.includes("/")
+        ? node.path.slice(0, node.path.lastIndexOf("/"))
+        : "";
+    setMenu(undefined);
+    void execute(async () => {
+      await api("CopyWorkingPath", c.id, clipboard.path, destination, clipboard.cut);
+      if (clipboard.cut) setClipboard(undefined);
+      await refreshWorkingTree();
+    });
+  };
   const openMenu = (event: ReactMouseEvent, node: FileTreeNode) => {
     event.preventDefault();
     event.stopPropagation();
+    setTreeSelected(node.path);
     setMenu({
       x: Math.min(event.clientX, Math.max(8, window.innerWidth - 220)),
       y: Math.min(event.clientY, Math.max(8, window.innerHeight - 260)),
@@ -1661,17 +1885,18 @@ function Worktree({
         const stats = treeStats(node);
         return [
           <div
-            className="tree-folder"
+            className={`tree-folder ${treeSelected === node.path ? "selected" : ""}`}
             key={`folder:${node.path}`}
             style={{ paddingLeft: 8 + depth * 14 }}
-            onClick={() =>
+            onClick={() => {
+              setTreeSelected(node.path);
               setChangesCollapsed((old) => {
                 const next = new Set(old);
                 if (next.has(node.path)) next.delete(node.path);
                 else next.add(node.path);
                 return next;
-              })
-            }
+              });
+            }}
             onContextMenu={(event) => openMenu(event, node)}
           >
             {expanded ? (
@@ -1698,7 +1923,7 @@ function Worktree({
       const changed = isChanged(item);
       return [
         <div
-          className={`desktop-file-row tree-file ${file?.path === item.path ? "selected" : ""}`}
+          className={`desktop-file-row tree-file ${file?.path === item.path ? "selected" : ""} ${treeSelected === item.path ? "tree-selected" : ""}`}
           key={`file:${item.path}`}
           style={{ paddingLeft: 6 + depth * 14 }}
           onContextMenu={(event) => openMenu(event, node)}
@@ -1733,7 +1958,7 @@ function Worktree({
             className="file-name"
             onClick={() => {
               if (fileView === "all" && !changed)
-                void openEditor(item.path);
+                void activateFile(item);
               else selectFile(item);
             }}
           >
@@ -1778,11 +2003,49 @@ function Worktree({
   const activeFile = file
     ? { path: file.path, staged: selectedSide }
     : undefined;
+  const infoPath = previewPath || editing || activeFile?.path || "";
+  const fileInfo = useQuery({
+    queryKey: ["git", "file-info", c.id, infoPath],
+    queryFn: () => api("InspectWorkingFile", c.id, infoPath),
+    enabled: tab === "changes" && !!infoPath,
+  });
+  const preview = useQuery({
+    queryKey: ["git", "file-preview", c.id, previewPath],
+    queryFn: () => api("ReadWorkingFilePreview", c.id, previewPath),
+    enabled:
+      tab === "changes" &&
+      !!previewPath &&
+      ["image", "audio", "video"].includes(
+        fileInfo.data?.previewKind || "",
+      ) &&
+      !fileInfo.data?.tooLarge,
+  });
+  useEffect(() => {
+    const info = fileInfo.data;
+    if (!activeFile || editing || !info || info.path !== activeFile.path) return;
+    if (info.previewKind !== "text") setPreviewPath(activeFile.path);
+  }, [activeFile?.path, editing, fileInfo.data]);
   const diff = useQuery({
     queryKey: ["git", "diff", c.id, activeFile?.path, activeFile?.staged],
     queryFn: () => api("GitDiff", c.id, activeFile!.path, activeFile!.staged),
     enabled: tab === "changes" && !!activeFile,
   });
+  const activeRawStats = file
+    ? {
+        additions:
+          (selectedSide ? file.indexAdditions : file.worktreeAdditions) || 0,
+        deletions:
+          (selectedSide ? file.indexDeletions : file.worktreeDeletions) || 0,
+      }
+    : { additions: 0, deletions: 0 };
+  const activeFilteredStats = diffStats(diff.data || "");
+  const activeIgnored = Math.max(
+    0,
+    activeRawStats.additions +
+      activeRawStats.deletions -
+      activeFilteredStats.insertions -
+      activeFilteredStats.deletions,
+  );
   const history = useQuery({
     queryKey: ["git", "history", c.id],
     queryFn: () => api("GitHistory", c.id),
@@ -1792,6 +2055,11 @@ function Worktree({
   const commitDiff = useQuery({
     queryKey: ["git", "commit-diff", c.id, commit?.hash],
     queryFn: () => api("GitCommitDiff", c.id, commit!.hash),
+    enabled: tab === "history" && !!commit,
+  });
+  const commitDiffFiltered = useQuery({
+    queryKey: ["git", "commit-diff-filtered", c.id, commit?.hash],
+    queryFn: () => api("GitCommitDiffFiltered", c.id, commit!.hash),
     enabled: tab === "history" && !!commit,
   });
   const historyFiles = useMemo(() => {
@@ -1811,6 +2079,45 @@ function Worktree({
       }))
       .sort((a, b) => a.path.localeCompare(b.path));
   }, [commitDiff.data]);
+  const historyFilteredFiles = useMemo(() => {
+    const chunks = (commitDiffFiltered.data || "")
+      .split(/(?=^diff --git )/m)
+      .filter((chunk) => chunk.startsWith("diff --git "));
+    return chunks
+      .map((diff) => ({
+        path: (() => {
+          const header =
+            /^diff --git (?:"a\/.*" "b\/([^"]+)"|a\/.* b\/(.*))$/m.exec(diff);
+          return header?.[1] || header?.[2] || "未知文件";
+        })(),
+        diff,
+      }))
+      .sort((a, b) => a.path.localeCompare(b.path));
+  }, [commitDiffFiltered.data]);
+  const historyRawFile = historyFile
+    ? historyFiles.find((item) => item.path === historyFile)
+    : undefined;
+  const historyDisplayText = historyFile
+    ? historyFilteredFiles.find((item) => item.path === historyFile)?.diff ||
+      ""
+    : commitDiffFiltered.data || "";
+  const historyRawStats = historyRawFile
+    ? {
+        additions: historyRawFile.insertions,
+        deletions: historyRawFile.deletions,
+      }
+    : {
+        additions: commit?.insertions || 0,
+        deletions: commit?.deletions || 0,
+      };
+  const historyFilteredStats = diffStats(historyDisplayText);
+  const historyIgnored = Math.max(
+    0,
+    historyRawStats.additions +
+      historyRawStats.deletions -
+      historyFilteredStats.insertions -
+      historyFilteredStats.deletions,
+  );
   const account = st.accounts.find((a) => a.id === accountID),
     profile = effectiveCommitIdentity(
       st,
@@ -1836,10 +2143,110 @@ function Worktree({
   const editorLineCount = editorText ? editorText.split("\n").length : 1;
   const editable = (f?: FileStatus) =>
     !!f && f.worktree !== "D" && f.index !== "D";
+  const commitNow = async () => {
+    const taskId = await api("CommitChanges", c.id, remote, draft);
+    useUI.getState().submitCommitDraft(c.id, taskId, draft);
+  };
+  const requestCommit = async () => {
+    if (!summary.trim() || !profile) return;
+    await execute(async () => {
+      setSending(true);
+      try {
+        const risks = await api(
+          "CheckLineEndingRisks",
+          c.id,
+          staged.map((file) => file.path),
+        );
+        if (risks.length) {
+          setLineEndingError("");
+          setLineEndingRisks(risks);
+          return;
+        }
+        await commitNow();
+      } finally {
+        setSending(false);
+      }
+    });
+  };
+  const fixAndCommit = async () => {
+    if (!lineEndingRisks) return;
+    setLineEndingError("");
+    await execute(async () => {
+      setLineEndingBusy(true);
+      try {
+        const paths = lineEndingRisks.map((risk) => risk.path);
+        await api("FixLineEndings", c.id, paths);
+        await client.invalidateQueries({ queryKey: ["git", "status", c.id] });
+        await client.invalidateQueries({ queryKey: ["git", "diff", c.id] });
+        const remaining = await api("CheckLineEndingRisks", c.id, paths);
+        if (remaining.length) {
+          setLineEndingRisks(remaining);
+          setLineEndingError(
+            "仍有文件存在换行符风险，请检查 .gitattributes 或手动处理后重试",
+          );
+          return;
+        }
+        setLineEndingRisks(undefined);
+        await commitNow();
+      } finally {
+        setLineEndingBusy(false);
+      }
+    });
+  };
+  const commitAsIs = async () => {
+    setLineEndingRisks(undefined);
+    await execute(async () => {
+      setSending(true);
+      try {
+        await commitNow();
+      } finally {
+        setSending(false);
+      }
+    });
+  };
+  const openWorking = (path: string, kind: string) => {
+    void execute(() =>
+      api("OpenWorkingPath", c.id, path, kind),
+    );
+  };
+  const changeFormat = (encoding: string, lineEnding: string) => {
+    if (!infoPath || formatBusy) return;
+    if (editing && editorText !== editorOriginal) {
+      window.alert("文件还有未保存的修改，请先保存后再切换编码或换行符。");
+      return;
+    }
+    void execute(async () => {
+      setFormatBusy(true);
+      try {
+        await api("SetWorkingFileFormat", c.id, infoPath, encoding, lineEnding);
+        await refreshWorkingTree();
+        if (editing) {
+          const content = await api("GitFileContent", c.id, editing);
+          setEditorText(content);
+          setEditorOriginal(content);
+        }
+      } finally {
+        setFormatBusy(false);
+      }
+    });
+  };
   return (
     <div
       className={`desktop-workspace ${activeFile || commit ? "has-file" : ""} ${tab === "changes" && status && files.length === 0 ? "clean-state" : ""}`}
     >
+      {tab === "changes" &&
+        fileBarSlot &&
+        fileInfo.data &&
+        createPortal(
+          <FileStatusBar
+            info={fileInfo.data}
+            busy={formatBusy}
+            onChange={changeFormat}
+            onOpenDefault={() => openWorking(fileInfo.data!.path, "default")}
+            onReveal={() => openWorking(fileInfo.data!.path, "reveal")}
+          />,
+          fileBarSlot,
+        )}
       <aside className="desktop-sidebar">
         <div className="desktop-tabs" role="tablist" aria-label="仓库内容">
           <button
@@ -1912,11 +2319,7 @@ function Worktree({
                 type="button"
                 className="new-file-button"
                 title="新建文件"
-                onClick={() => {
-                  setNewFileName("");
-                  setNewFileError("");
-                  setNewFileOpen(true);
-                }}
+                onClick={() => startCreate(createBase, "file")}
               >
                 <FilePlus2 size={13} />
                 新建
@@ -1933,6 +2336,7 @@ function Worktree({
                 )
                   return;
                 event.preventDefault();
+                setTreeSelected("");
                 setMenu({
                   x: Math.min(
                     event.clientX,
@@ -2097,10 +2501,12 @@ function Worktree({
                 {commit.author} &lt;{commit.email}&gt; ·{" "}
                 {new Date(commit.date).toLocaleString("zh-CN")}
               </div>
-              {commitDiff.isPending ? (
+              {commitDiff.isPending || commitDiffFiltered.isPending ? (
                 <Loading />
               ) : commitDiff.isError ? (
                 <ErrorNotice message={errorMessage(commitDiff.error)} />
+              ) : commitDiffFiltered.isError ? (
+                <ErrorNotice message={errorMessage(commitDiffFiltered.error)} />
               ) : (
                 <div className="desktop-history-content">
                   <nav className="desktop-history-tree" aria-label="提交文件树">
@@ -2123,7 +2529,12 @@ function Worktree({
                       </button>] : [])];
                     })}
                   </nav>
-                  <DiffViewer key={commit.hash + historyFile} text={historyFile ? historyFiles.find((f) => f.path === historyFile)?.diff || "" : commitDiff.data || ""} />
+                  <DiffViewer
+                    key={commit.hash + historyFile}
+                    text={historyDisplayText}
+                    stats={historyRawStats}
+                    ignored={historyIgnored}
+                  />
                 </div>
               )}
             </>
@@ -2216,6 +2627,27 @@ function Worktree({
               </div>
             )}
           </div>
+        ) : previewPath ? (
+          <FilePreviewPane
+            path={previewPath}
+            info={fileInfo.data}
+            preview={preview.data}
+            loading={fileInfo.isPending || preview.isFetching}
+            error={
+              fileInfo.isError
+                ? errorMessage(fileInfo.error)
+                : preview.isError
+                  ? errorMessage(preview.error)
+                  : ""
+            }
+            onClose={() => {
+              setPreviewPath("");
+              setSelected(undefined);
+            }}
+            onEdit={() => void openEditor(previewPath)}
+            onOpenDefault={() => openWorking(previewPath, "default")}
+            onReveal={() => openWorking(previewPath, "reveal")}
+          />
         ) : activeFile ? (
           <>
             <div className="desktop-diff-header">
@@ -2257,10 +2689,12 @@ function Worktree({
               <Loading />
             ) : diff.isError ? (
               <ErrorNotice message={errorMessage(diff.error)} />
-            ) : diff.data ? (
+            ) : diff.data || activeIgnored > 0 ? (
               <DiffViewer
                 key={activeFile.path + activeFile.staged}
-                text={diff.data}
+                text={diff.data || ""}
+                stats={activeRawStats}
+                ignored={activeIgnored}
                 showFileHeaders={false}
               />
             ) : (
@@ -2270,7 +2704,7 @@ function Worktree({
                 <p>
                   {file?.index === "?"
                     ? "新文件尚未跟踪。勾选文件加入暂存后可查看差异。"
-                    : "此变更可能是二进制文件、重命名或文件属性变化。"}
+                    : "差异为空：可能仅包含换行符变化（已忽略），或为二进制、重命名、文件属性变化。"}
                 </p>
               </div>
             )}
@@ -2328,61 +2762,195 @@ function Worktree({
           </div>
         )}
       </main>
+      {lineEndingRisks && (
+        <Modal
+          title="检测到换行符风险"
+          onClose={() => {
+            if (!lineEndingBusy) setLineEndingRisks(undefined);
+          }}
+        >
+          <p>以下文件包含混合换行符，或与仓库的 eol 规则不一致：</p>
+          <div className="line-ending-list">
+            {lineEndingRisks.map((risk) => (
+              <div className="line-ending-row" key={risk.path}>
+                <code>{risk.path}</code>
+                <span>
+                  {risk.mixed ? "混合" : risk.policy ? `规则 ${risk.policy}` : "风险"}
+                </span>
+                <small>
+                  CRLF {risk.crlf} · LF {risk.lf}
+                </small>
+              </div>
+            ))}
+          </div>
+          <p className="subtle-note">
+            存在 .gitattributes 时将优先按其 eol 规则修复；没有显式规则时按 Git 文本规则规范化为 LF。
+          </p>
+          {lineEndingError && (
+            <div className="desktop-stage-error" role="alert">
+              {lineEndingError}
+            </div>
+          )}
+          <div className="form-actions">
+            <button
+              type="button"
+              disabled={lineEndingBusy}
+              onClick={() => setLineEndingRisks(undefined)}
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              disabled={lineEndingBusy}
+              onClick={() => void commitAsIs()}
+            >
+              原样提交
+            </button>
+            <button
+              type="button"
+              className="primary"
+              disabled={lineEndingBusy}
+              onClick={() => void fixAndCommit()}
+            >
+              {lineEndingBusy ? "正在修复…" : "按 Git 规则修复并提交"}
+            </button>
+          </div>
+        </Modal>
+      )}
       {menu && (
         <div
           className="desktop-context-menu"
           role="menu"
           style={{ left: menu.x, top: menu.y }}
         >
-          {menu.node.path === "" ? (
-            <button
-              onClick={() => {
-                setMenu(undefined);
-                setNewFileName("");
-                setNewFileError("");
-                setNewFileOpen(true);
-              }}
-            >
-              <FilePlus2 size={14} />
-              新建文件…
-            </button>
-          ) : menu.node.isDir ? (
+          {menu.node.isDir ? (
             <>
-              {flattenTree(menu.node).some(isChanged) && (
-                <button
-                  onClick={() =>
-                    stageNode(menu.node, !nodeStaged(menu.node))
-                  }
-                >
-                  {nodeStaged(menu.node) ? "取消暂存目录" : "暂存目录"}
+              <button onClick={() => startCreate(menu.node.path, "file")}>
+                <FilePlus2 size={14} />
+                {menu.node.path ? "新建子文件…" : "新建文件…"}
+              </button>
+              <button onClick={() => startCreate(menu.node.path, "dir")}>
+                <FolderPlus size={14} />
+                {menu.node.path ? "新建子目录…" : "新建目录…"}
+              </button>
+              <button onClick={() => openWorking(menu.node.path, "folder")}>
+                <FolderOpen size={14} />
+                打开文件夹
+              </button>
+              <button onClick={() => openWorking(menu.node.path, "terminal")}>
+                <Terminal size={14} />
+                在终端中打开
+              </button>
+              {clipboard && (
+                <button onClick={() => pasteInto(menu.node)}>
+                  <ClipboardPaste size={14} />
+                  粘贴{clipboard.cut ? "（移动）" : ""}
                 </button>
               )}
-              <button
-                onClick={() => {
-                  setMenu(undefined);
-                  setNewFileName(`${menu.node.path}/`);
-                  setNewFileError("");
-                  setNewFileOpen(true);
-                }}
-              >
-                <FilePlus2 size={14} />
-                新建文件…
-              </button>
-              <button onClick={() => ignoreNode(menu.node)}>
-                <EyeOff size={14} />
-                添加到 .gitignore
-              </button>
-              {flattenTree(menu.node).some(
-                (file) => file.tracked ?? file.index !== "?",
-              ) && (
-                <button onClick={() => untrackNode(menu.node)}>
-                  <Trash2 size={14} />
-                  移除 Git 跟踪
+              {menu.node.path &&
+                flattenTree(menu.node).some(isChanged) && (
+                  <button
+                    onClick={() =>
+                      stageNode(menu.node, !nodeStaged(menu.node))
+                    }
+                  >
+                    {nodeStaged(menu.node) ? "取消暂存目录" : "暂存目录"}
+                  </button>
+                )}
+              {menu.node.path && (
+                <button onClick={() => ignoreNode(menu.node)}>
+                  <EyeOff size={14} />
+                  添加到 .gitignore
                 </button>
+              )}
+              {menu.node.path &&
+                flattenTree(menu.node).some(
+                  (file) => file.tracked ?? file.index !== "?",
+                ) && (
+                  <button onClick={() => untrackNode(menu.node)}>
+                    <Trash2 size={14} />
+                    移除 Git 跟踪
+                  </button>
+                )}
+              {menu.node.path && (
+                <>
+                  <button
+                    onClick={() => {
+                      void navigator.clipboard.writeText(menu.node.path);
+                      setMenu(undefined);
+                    }}
+                  >
+                    <Copy size={14} />
+                    复制相对路径
+                  </button>
+                  <button
+                    onClick={() => {
+                      void navigator.clipboard.writeText(menu.node.name);
+                      setMenu(undefined);
+                    }}
+                  >
+                    <Copy size={14} />
+                    复制名称
+                  </button>
+                  <button onClick={() => copyEntry(menu.node, false)}>
+                    <Copy size={14} />
+                    复制
+                  </button>
+                  <button onClick={() => copyEntry(menu.node, true)}>
+                    <Scissors size={14} />
+                    剪切
+                  </button>
+                  <button
+                    onClick={() => {
+                      setRenameTarget(menu.node);
+                      setRenameName(menu.node.name);
+                      setRenameError("");
+                      setMenu(undefined);
+                    }}
+                  >
+                    <Pencil size={14} />
+                    重命名…
+                  </button>
+                  <button onClick={() => removeEntry(menu.node)}>
+                    <Trash2 size={14} />
+                    删除…
+                  </button>
+                </>
               )}
             </>
           ) : (
             <>
+              <button onClick={() => openPreview(menu.node.path)}>
+                <Eye size={14} />
+                预览
+              </button>
+              <button
+                disabled={!editable(menu.node.file)}
+                onClick={() => void openEditor(menu.node.path)}
+              >
+                <Pencil size={14} />
+                编辑文件
+              </button>
+              <button onClick={() => openWorking(menu.node.path, "default")}>
+                <ExternalLink size={14} />
+                用默认应用打开
+              </button>
+              <button onClick={() => openWorking(menu.node.path, "reveal")}>
+                <FolderOpen size={14} />
+                打开文件所在位置
+              </button>
+              <button onClick={() => startCreate(parentPath(menu.node.path), "file")}>
+                <FilePlus2 size={14} />
+                新建同级文件…
+              </button>
+              <button onClick={() => startCreate(parentPath(menu.node.path), "dir")}>
+                <FolderPlus size={14} />
+                新建同级目录…
+              </button>
+              <button onClick={() => pasteInto(menu.node)} disabled={!clipboard}>
+                <ClipboardPaste size={14} />
+                粘贴{clipboard?.cut ? "（移动）" : ""}
+              </button>
               {isChanged(menu.node.file!) && (
                 <button
                   onClick={() =>
@@ -2392,13 +2960,6 @@ function Worktree({
                   {nodeStaged(menu.node) ? "取消暂存" : "暂存"}
                 </button>
               )}
-              <button
-                disabled={!editable(menu.node.file)}
-                onClick={() => void openEditor(menu.node.path)}
-              >
-                <Pencil size={14} />
-                编辑文件
-              </button>
               <button onClick={() => ignoreNode(menu.node)}>
                 <EyeOff size={14} />
                 添加到 .gitignore
@@ -2417,26 +2978,64 @@ function Worktree({
                 }}
               >
                 <Copy size={14} />
-                复制路径
+                复制相对路径
+              </button>
+              <button
+                onClick={() => {
+                  void navigator.clipboard.writeText(menu.node.name);
+                  setMenu(undefined);
+                }}
+              >
+                <Copy size={14} />
+                复制文件名
+              </button>
+              <button onClick={() => copyEntry(menu.node, false)}>
+                <Copy size={14} />
+                复制
+              </button>
+              <button onClick={() => copyEntry(menu.node, true)}>
+                <Scissors size={14} />
+                剪切
+              </button>
+              <button
+                onClick={() => {
+                  setRenameTarget(menu.node);
+                  setRenameName(menu.node.name);
+                  setRenameError("");
+                  setMenu(undefined);
+                }}
+              >
+                <Pencil size={14} />
+                重命名…
+              </button>
+              <button onClick={() => removeEntry(menu.node)}>
+                <Trash2 size={14} />
+                删除…
               </button>
             </>
           )}
         </div>
       )}
       {newFileOpen && (
-        <Modal title="新建文件" onClose={() => setNewFileOpen(false)}>
+        <Modal
+          title={newItemKind === "dir" ? "新建目录" : "新建文件"}
+          onClose={() => setNewFileOpen(false)}
+        >
           <form
             onSubmit={(e) => {
               e.preventDefault();
               void createFile();
             }}
           >
-            <Field label="文件路径" hint="相对仓库根目录，例如 src/new.ts">
+            <Field
+              label={newItemKind === "dir" ? "目录路径" : "文件路径"}
+              hint="相对仓库根目录，例如 src/new.ts"
+            >
               <input
                 autoFocus
                 value={newFileName}
                 onChange={(e) => setNewFileName(e.target.value)}
-                placeholder="src/new.ts"
+                placeholder={newItemKind === "dir" ? "src/new-folder" : "src/new.ts"}
               />
             </Field>
             {newFileError && (
@@ -2455,6 +3054,46 @@ function Worktree({
           </form>
         </Modal>
       )}
+      {renameTarget && (
+        <Modal
+          title="重命名"
+          onClose={() => setRenameTarget(undefined)}
+        >
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              void renameEntry();
+            }}
+          >
+            <Field label="新名称" hint={renameTarget.path}>
+              <input
+                autoFocus
+                value={renameName}
+                onChange={(e) => setRenameName(e.target.value)}
+              />
+            </Field>
+            {renameError && (
+              <div className="desktop-stage-error" role="alert">
+                {renameError}
+              </div>
+            )}
+            <div className="form-actions">
+              <button
+                type="button"
+                onClick={() => setRenameTarget(undefined)}
+              >
+                取消
+              </button>
+              <button
+                className="primary"
+                disabled={!renameName.trim() || renameName === renameTarget.name}
+              >
+                重命名
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
     </div>
   );
 }
@@ -2466,7 +3105,278 @@ type FileTreeNode = {
   children: FileTreeNode[];
 };
 
-function buildFileTree(files: FileStatus[]): FileTreeNode[] {
+function parentPath(path: string) {
+  const index = path.lastIndexOf("/");
+  return index < 0 ? "" : path.slice(0, index);
+}
+
+function findTreeNode(
+  nodes: FileTreeNode[],
+  path: string,
+): FileTreeNode | undefined {
+  for (const node of nodes) {
+    if (node.path === path) return node;
+    const found = findTreeNode(node.children, path);
+    if (found) return found;
+  }
+  return undefined;
+}
+
+function formatBytes(size: number) {
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KiB`;
+  return `${(size / (1024 * 1024)).toFixed(1)} MiB`;
+}
+
+function FileStatusBar({
+  info,
+  busy,
+  onChange,
+  onOpenDefault,
+  onReveal,
+}: {
+  info: WorkingFileInfo;
+  busy: boolean;
+  onChange: (encoding: string, lineEnding: string) => void;
+  onOpenDefault: () => void;
+  onReveal: () => void;
+}) {
+  const [open, setOpen] = useState<"encoding" | "lineEnding" | "">("");
+  useEffect(() => {
+    if (!open) return;
+    const close = (event: PointerEvent) => {
+      if (!(event.target as Element).closest(".filebar-format")) setOpen("");
+    };
+    document.addEventListener("pointerdown", close);
+    return () => document.removeEventListener("pointerdown", close);
+  }, [open]);
+  if (info.isDir) return null;
+  const textEditable =
+    info.previewKind === "text" && !info.binary && !info.tooLarge;
+  const lineEnding =
+    info.lineEnding === "LF" ||
+    info.lineEnding === "CRLF" ||
+    info.lineEnding === "CR"
+      ? info.lineEnding
+      : "LF";
+  return (
+    <div className="desktop-filebar">
+      <span className="filebar-path" title={info.path}>
+        {info.path}
+      </span>
+      <span className="filebar-size">{formatBytes(info.size)}</span>
+      <div className="filebar-format">
+        <button
+          type="button"
+          disabled={!textEditable || busy}
+          title={textEditable ? "切换编码" : "该文件不能切换文本编码"}
+          onClick={() => setOpen(open === "encoding" ? "" : "encoding")}
+        >
+          {info.encoding}
+        </button>
+        {open === "encoding" && (
+          <div className="filebar-menu">
+            {["UTF-8", "UTF-8 BOM", "UTF-16 LE", "UTF-16 BE"].map((value) => (
+              <button
+                type="button"
+                key={value}
+                className={value === info.encoding ? "active" : ""}
+                onClick={() => {
+                  setOpen("");
+                  onChange(value, lineEnding);
+                }}
+              >
+                {value}
+                {value === info.encoding && <Check size={12} />}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+      <div className="filebar-format">
+        <button
+          type="button"
+          disabled={!textEditable || busy || info.lineEnding === "None"}
+          title={textEditable ? "切换换行符" : "该文件不能切换换行符"}
+          onClick={() => setOpen(open === "lineEnding" ? "" : "lineEnding")}
+        >
+          {info.lineEnding === "None" ? "无换行" : info.lineEnding}
+        </button>
+        {open === "lineEnding" && (
+          <div className="filebar-menu">
+            {[
+              ["LF", "LF（Unix）"],
+              ["CRLF", "CRLF（Windows）"],
+              ["CR", "CR（旧版 Mac）"],
+            ].map(([value, label]) => (
+              <button
+                type="button"
+                key={value}
+                className={value === info.lineEnding ? "active" : ""}
+                onClick={() => {
+                  setOpen("");
+                  onChange(
+                    ["UTF-8", "UTF-8 BOM", "UTF-16 LE", "UTF-16 BE"].includes(
+                      info.encoding,
+                    )
+                      ? info.encoding
+                      : "UTF-8",
+                    value,
+                  );
+                }}
+              >
+                {label}
+                {value === info.lineEnding && <Check size={12} />}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+      {!textEditable && (
+        <>
+          <button type="button" className="filebar-action" onClick={onOpenDefault}>
+            <ExternalLink size={12} />
+            默认应用打开
+          </button>
+          <button type="button" className="filebar-action" onClick={onReveal}>
+            <FolderOpen size={12} />
+            所在位置
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
+function FilePreviewPane({
+  path,
+  info,
+  preview,
+  loading,
+  error,
+  onClose,
+  onEdit,
+  onOpenDefault,
+  onReveal,
+}: {
+  path: string;
+  info?: WorkingFileInfo;
+  preview?: WorkingFilePreview;
+  loading: boolean;
+  error: string;
+  onClose: () => void;
+  onEdit: () => void;
+  onOpenDefault: () => void;
+  onReveal: () => void;
+}) {
+  const kind = info?.previewKind;
+  const needsPreview =
+    !!info &&
+    ["image", "audio", "video"].includes(info.previewKind) &&
+    !info.tooLarge;
+  const source = preview
+    ? `data:${preview.mimeType};base64,${preview.data}`
+    : "";
+  return (
+    <div className="desktop-preview-pane">
+      <div className="desktop-diff-header">
+        <button className="desktop-back" aria-label="返回文件列表" onClick={onClose}>
+          <ArrowLeft size={16} />
+        </button>
+        {kind === "image" ? (
+          <ImageIcon size={16} />
+        ) : kind === "audio" ? (
+          <Music size={16} />
+        ) : kind === "video" ? (
+          <Video size={16} />
+        ) : (
+          <FileQuestion size={16} />
+        )}
+        <strong>{path}</strong>
+        {info && (
+          <>
+            <span>{info.encoding}</span>
+            <span>{info.lineEnding === "None" ? "无换行" : info.lineEnding}</span>
+            <span>{formatBytes(info.size)}</span>
+          </>
+        )}
+        <span className="editor-actions">
+          {info?.editable && (
+            <button onClick={onEdit}>
+              <Pencil size={14} />
+              编辑
+            </button>
+          )}
+          <button onClick={onOpenDefault}>
+            <ExternalLink size={14} />
+            默认应用
+          </button>
+          <button onClick={onReveal}>
+            <FolderOpen size={14} />
+            所在位置
+          </button>
+        </span>
+      </div>
+      {loading || (needsPreview && !preview && !error) ? (
+        <Loading />
+      ) : error ? (
+        <div className="desktop-preview-empty">
+          <FileQuestion size={42} strokeWidth={1.3} />
+          <h2>无法预览此文件</h2>
+          <p>{error}</p>
+          <div className="form-actions">
+            <button onClick={onOpenDefault}>用默认应用打开</button>
+            <button onClick={onReveal}>打开文件所在位置</button>
+          </div>
+        </div>
+      ) : !info ? (
+        <Loading />
+      ) : info.previewKind === "unsupported" || info.tooLarge ? (
+        <div className="desktop-preview-empty">
+          <FileQuestion size={42} strokeWidth={1.3} />
+          <h2>{info.tooLarge ? "文件过大" : "不支持内置预览"}</h2>
+          <p>
+            {info.tooLarge
+              ? "文件超过 32 MiB，请使用默认应用打开。"
+              : `${info.mimeType || "二进制文件"}，可以使用默认应用查看。`}
+          </p>
+          <div className="form-actions">
+            <button onClick={onOpenDefault}>用默认应用打开</button>
+            <button onClick={onReveal}>打开文件所在位置</button>
+          </div>
+        </div>
+      ) : info.previewKind === "image" && source ? (
+        <div className="desktop-preview-media">
+          <img src={source} alt={path} />
+        </div>
+      ) : info.previewKind === "audio" && source ? (
+        <div className="desktop-preview-media">
+          <Music size={52} strokeWidth={1.2} />
+          <audio controls src={source} />
+        </div>
+      ) : info.previewKind === "video" && source ? (
+        <div className="desktop-preview-media">
+          <video controls src={source} />
+        </div>
+      ) : (
+        <div className="desktop-preview-empty">
+          <FileText size={42} strokeWidth={1.3} />
+          <h2>文本文件</h2>
+          <p>使用内置编辑器查看和修改此文件。</p>
+          <div className="form-actions">
+            {info.editable && <button onClick={onEdit}>编辑文件</button>}
+            <button onClick={onOpenDefault}>用默认应用打开</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function buildFileTree(
+  files: FileStatus[],
+  rootNode?: { name: string; path: string },
+): FileTreeNode[] {
   type MutableNode = {
     name: string;
     path: string;
@@ -2518,7 +3428,18 @@ function buildFileTree(files: FileStatus[]): FileTreeNode[] {
         file: node.file,
         children: finish(node.children),
       }));
-  return finish(root);
+  const children = finish(root);
+  if (rootNode) {
+    return [
+      {
+        name: rootNode.name,
+        path: rootNode.path,
+        isDir: true,
+        children,
+      },
+    ];
+  }
+  return children;
 }
 
 function fileStats(file: FileStatus) {
@@ -2589,12 +3510,22 @@ function diffChangeKind(diff: string) {
 export function DiffViewer({
   text,
   showFileHeaders = true,
+  stats,
+  fileCount,
+  ignored = 0,
 }: {
   text: string;
   showFileHeaders?: boolean;
+  stats?: { additions: number; deletions: number };
+  fileCount?: number;
+  ignored?: number;
 }) {
   const [limit, setLimit] = useState(1500);
-  const stats = useMemo(() => diffStats(text), [text]);
+  const filteredStats = useMemo(() => diffStats(text), [text]);
+  const shownStats = stats ?? {
+    additions: filteredStats.insertions,
+    deletions: filteredStats.deletions,
+  };
   const lines = useMemo(() => {
     let old = 0,
       next = 0;
@@ -2641,9 +3572,12 @@ export function DiffViewer({
   return (
     <div className="desktop-diff" role="region" aria-label="文件差异">
       <div className="diff-summary" aria-label="差异统计">
-        <span>{stats.files} 个文件</span>
-        <span className="stat-add">+{stats.insertions}</span>
-        <span className="stat-del">−{stats.deletions}</span>
+        <span>{fileCount ?? filteredStats.files} 个文件</span>
+        <span className="stat-add">+{shownStats.additions}</span>
+        <span className="stat-del">−{shownStats.deletions}</span>
+        {ignored > 0 && (
+          <span className="diff-ignored">已忽略 {ignored} 行换行符差异</span>
+        )}
       </div>
       <div className="diff-table">
         {lines.slice(0, limit).map((row) => (
@@ -2663,3 +3597,7 @@ export function DiffViewer({
     </div>
   );
 }
+
+
+
+

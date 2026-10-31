@@ -31,6 +31,7 @@ vi.mock("./api", () => ({
   api: mocks.api,
   isDesktop: true,
   onStateChanged: async () => () => {},
+  onAppActivated: async () => () => {},
   errorMessage: (error: unknown) =>
     error instanceof Error ? error.message : String(error),
 }));

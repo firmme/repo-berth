@@ -467,7 +467,7 @@ func (s *Service) OpenCheckout(id, kind string) error {
 	if d == nil {
 		return model.Err("DESKTOP_REQUIRED", "请在桌面应用中打开目录")
 	}
-	if kind != "folder" && kind != "terminal" && kind != "editor" {
+	if kind != "folder" && kind != "terminal" && kind != "editor" && kind != "vscode" {
 		return model.Err("INVALID_OPERATION", "不支持的打开方式")
 	}
 	if err = d.OpenPath(c.Path, kind, editor); err != nil {

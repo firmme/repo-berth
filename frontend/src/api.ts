@@ -10,6 +10,10 @@ import type {
   Commit,
   Branch,
   FileEntry,
+  RemoteCheck,
+  LineEndingRisk,
+  WorkingFileInfo,
+  WorkingFilePreview,
 } from "./types";
 import { emptyState } from "./types";
 
@@ -87,15 +91,37 @@ interface Methods {
   OpenCheckoutGitHub: (id: string, remote: string) => void;
   GitStatus: (id: string) => GitStatus;
   GitFiles: (id: string) => FileEntry[];
+  CheckRemoteUpdate: (id: string, remote: string) => RemoteCheck;
   GitDiff: (id: string, file: string, staged: boolean) => string;
   GitHistory: (id: string) => Commit[];
   GitCommitDiff: (id: string, hash: string) => string;
+  GitCommitDiffFiltered: (id: string, hash: string) => string;
+  CheckLineEndingRisks: (id: string, files: string[]) => LineEndingRisk[];
+  FixLineEndings: (id: string, files: string[]) => void;
   GitBranches: (id: string) => Branch[];
   StageFile: (id: string, file: string, stage: boolean) => void;
   StageFiles: (id: string, files: string[], stage: boolean) => void;
   GitFileContent: (id: string, file: string) => string;
   SaveWorkingFile: (id: string, file: string, content: string) => void;
   CreateWorkingFile: (id: string, file: string) => void;
+  CreateWorkingDirectory: (id: string, path: string) => void;
+  RenameWorkingPath: (id: string, path: string, name: string) => void;
+  DeleteWorkingPath: (id: string, path: string) => void;
+  CopyWorkingPath: (
+    id: string,
+    source: string,
+    destinationDir: string,
+    cut: boolean,
+  ) => void;
+  OpenWorkingPath: (id: string, path: string, kind: string) => void;
+  InspectWorkingFile: (id: string, file: string) => WorkingFileInfo;
+  ReadWorkingFilePreview: (id: string, file: string) => WorkingFilePreview;
+  SetWorkingFileFormat: (
+    id: string,
+    file: string,
+    encoding: string,
+    lineEnding: string,
+  ) => void;
   AddToGitignore: (id: string, file: string, directory: boolean) => void;
   UntrackFile: (id: string, file: string, recursive: boolean) => void;
   CommitChanges: (id: string, remote: string, message: string) => string;
@@ -131,6 +157,19 @@ export async function onStateChanged(
   return () => {
     offState();
     offTask();
+  };
+}
+export async function onAppActivated(
+  callback: () => void,
+): Promise<() => void> {
+  if (!isDesktop) return () => {};
+  const { Events } = await import("@wailsio/runtime");
+  const offSecond = Events.On("app:second-instance", callback);
+  const focus = () => callback();
+  window.addEventListener("focus", focus);
+  return () => {
+    offSecond();
+    window.removeEventListener("focus", focus);
   };
 }
 export function errorMessage(e: unknown): string {

@@ -281,6 +281,12 @@ func (r Runner) Root(ctx context.Context, path string) (string, error) {
 	}
 	return Canonical(strings.TrimSpace(out))
 }
+
+type RemoteHead struct {
+	Branch string `json:"branch"`
+	Head   string `json:"head"`
+}
+
 func (r Runner) Remotes(ctx context.Context, path string) ([]Remote, error) {
 	out, err := r.Run(ctx, path, nil, nil, "remote")
 	if err != nil {
@@ -338,6 +344,47 @@ func (r Runner) Files(ctx context.Context, path string) ([]FileEntry, error) {
 		return nil, err
 	}
 	return entries, nil
+}
+
+// RemoteHead queries the remote branch tip without downloading objects. It is
+// used to tell the user that the remote has new commits before a full fetch.
+func (r Runner) RemoteHead(ctx context.Context, path, remote string, auth *Auth) (RemoteHead, error) {
+	remotes, err := r.Remotes(ctx, path)
+	if err != nil {
+		return RemoteHead{}, err
+	}
+	url := ""
+	for _, item := range remotes {
+		if item.Name == remote {
+			url = item.URL
+		}
+	}
+	if url == "" {
+		return RemoteHead{}, model.Err("REMOTE_INVALID", "请先选择远程仓库")
+	}
+	if _, err = GitHubTarget(url); err != nil {
+		return RemoteHead{}, err
+	}
+	branch, err := r.Run(ctx, path, nil, nil, "symbolic-ref", "--short", "-q", "HEAD")
+	if err != nil {
+		return RemoteHead{}, model.Err("DETACHED_HEAD", "当前处于分离 HEAD 状态，请先切换到本地分支")
+	}
+	branch = strings.TrimSpace(branch)
+	var credentials *Auth
+	if auth != nil && auth.Login != "" && auth.Token != "" {
+		copied := *auth
+		copied.URL = url
+		credentials = &copied
+	}
+	out, err := r.Run(ctx, path, credentials, nil, "ls-remote", "--heads", url, "refs/heads/"+branch)
+	if err != nil {
+		return RemoteHead{}, err
+	}
+	fields := strings.Fields(strings.TrimSpace(out))
+	if len(fields) < 2 {
+		return RemoteHead{}, model.Err("REMOTE_BRANCH_MISSING", "远端没有当前分支")
+	}
+	return RemoteHead{Branch: branch, Head: fields[0]}, nil
 }
 func embeddedCredentials(raw string) bool {
 	u, err := url.Parse(raw)
@@ -453,7 +500,7 @@ func applyNumstat(files []FileStatus, raw string, staged bool) {
 	}
 }
 func (r Runner) Diff(ctx context.Context, path, file string, staged bool) (string, error) {
-	args := []string{"diff", "--no-ext-diff", "--no-textconv", "--no-color", "--patch"}
+	args := []string{"diff", "--no-ext-diff", "--no-textconv", "--no-color", "--patch", "--ignore-cr-at-eol"}
 	if staged {
 		args = append(args, "--cached")
 	}
@@ -465,6 +512,15 @@ func (r Runner) CommitDiff(ctx context.Context, path, hash string) (string, erro
 		return "", model.Err("INVALID_COMMIT", "请选择有效的提交")
 	}
 	return r.Run(ctx, path, nil, nil, "show", "--format=", "--no-ext-diff", "--no-textconv", "--find-renames", hash, "--")
+}
+
+// CommitDiffFiltered hides carriage-return-only changes for display while the
+// raw diff remains available for statistics.
+func (r Runner) CommitDiffFiltered(ctx context.Context, path, hash string) (string, error) {
+	if !regexp.MustCompile(`^(?:[a-fA-F0-9]{40}|[a-fA-F0-9]{64})$`).MatchString(hash) {
+		return "", model.Err("INVALID_COMMIT", "请选择有效的提交")
+	}
+	return r.Run(ctx, path, nil, nil, "show", "--format=", "--no-ext-diff", "--no-textconv", "--find-renames", "--ignore-cr-at-eol", hash, "--")
 }
 func (r Runner) History(ctx context.Context, path string) ([]Commit, error) {
 	out, err := r.Run(ctx, path, nil, nil, "log", "-50", "--numstat", "--format=%x1e%H%x00%an%x00%ae%x00%aI%x00%s")

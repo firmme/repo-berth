@@ -464,3 +464,24 @@ func TestStatusReportsPerFileLineChanges(t *testing.T) {
 		t.Fatalf("unexpected index stats: %+v", status.Files)
 	}
 }
+
+func TestDiffIgnoresCarriageReturnOnlyChanges(t *testing.T) {
+	path := initRepo(t)
+	r := Runner{Binary: "git"}
+	file := filepath.Join(path, "file.txt")
+	if err := os.WriteFile(file, []byte("one\ntwo\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	testGit(t, path, "add", ".")
+	testGit(t, path, "-c", "user.name=Test", "-c", "user.email=test@example.test", "commit", "-m", "base")
+	if err := os.WriteFile(file, []byte("one\r\ntwo\r\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	diff, err := r.Diff(context.Background(), path, "file.txt", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(diff) != "" {
+		t.Fatalf("carriage-return-only change was shown: %q", diff)
+	}
+}

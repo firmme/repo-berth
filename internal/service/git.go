@@ -5,6 +5,7 @@ import (
 	"os"
 	"repo-berth/internal/gitexec"
 	"repo-berth/internal/model"
+	"strings"
 	"time"
 )
 
@@ -26,6 +27,46 @@ func (s *Service) GitFiles(id string) ([]gitexec.FileEntry, error) {
 	ctx, cancel := context.WithTimeout(s.ctx, 30*time.Second)
 	defer cancel()
 	return s.runner().Files(ctx, c.Path)
+}
+
+type RemoteCheck struct {
+	Remote   string `json:"remote"`
+	Branch   string `json:"branch"`
+	Head     string `json:"head"`
+	Tracking string `json:"tracking"`
+	Updated  bool   `json:"updated"`
+}
+
+// CheckRemoteUpdate compares the remote branch tip with the last fetched
+// remote-tracking ref. It never downloads objects or updates refs.
+func (s *Service) CheckRemoteUpdate(id, remote string) (RemoteCheck, error) {
+	c, err := s.gitCheckout(id)
+	if err != nil {
+		return RemoteCheck{}, err
+	}
+	ctx, cancel := context.WithTimeout(s.ctx, 30*time.Second)
+	defer cancel()
+	var auth *gitexec.Auth
+	if st, err := s.Snapshot(); err == nil {
+		if binding, _, err := accessBinding(&st, id, remote); err == nil && binding.AccountID != "" {
+			if account, err := s.account(binding.AccountID); err == nil {
+				if token, err := s.vault.Get(account.CredentialRef); err == nil {
+					if helper, err := os.Executable(); err == nil {
+						auth = &gitexec.Auth{Login: account.Login, Token: token, Helper: helper}
+					}
+				}
+			}
+		}
+	}
+	head, err := s.runner().RemoteHead(ctx, c.Path, remote, auth)
+	if err != nil {
+		return RemoteCheck{}, err
+	}
+	tracking := ""
+	if raw, err := s.runner().Run(ctx, c.Path, nil, nil, "rev-parse", "--verify", "--quiet", "refs/remotes/"+remote+"/"+head.Branch); err == nil {
+		tracking = strings.TrimSpace(raw)
+	}
+	return RemoteCheck{Remote: remote, Branch: head.Branch, Head: head.Head, Tracking: tracking, Updated: tracking != head.Head}, nil
 }
 func (s *Service) GitDiff(id, file string, staged bool) (string, error) {
 	if err := gitexec.ValidFile(file); err != nil {
@@ -50,6 +91,14 @@ func (s *Service) GitCommitDiff(id, hash string) (string, error) {
 		return "", err
 	}
 	return s.runner().CommitDiff(s.ctx, c.Path, hash)
+}
+
+func (s *Service) GitCommitDiffFiltered(id, hash string) (string, error) {
+	c, err := s.gitCheckout(id)
+	if err != nil {
+		return "", err
+	}
+	return s.runner().CommitDiffFiltered(s.ctx, c.Path, hash)
 }
 func (s *Service) GitBranches(id string) ([]gitexec.Branch, error) {
 	c, err := s.gitCheckout(id)

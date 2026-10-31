@@ -31,20 +31,15 @@ func (d desktop) PickDirectory() (string, error) {
 	return d.app.Dialog.OpenFile().CanChooseFiles(false).CanChooseDirectories(true).CanCreateDirectories(true).SetTitle("选择仓库目录").PromptForSingleSelection()
 }
 func (d desktop) OpenPath(path, kind, editor string) error {
-	if kind == "folder" {
+	if kind == "folder" || kind == "default" {
 		return d.app.Browser.OpenFile(path)
 	}
-	if kind == "editor" {
-		if editor == "" {
-			editor = "code"
-			if runtime.GOOS == "windows" {
-				for _, candidate := range []string{filepath.Join(os.Getenv("LOCALAPPDATA"), "Programs", "Microsoft VS Code", "Code.exe"), filepath.Join(os.Getenv("ProgramFiles"), "Microsoft VS Code", "Code.exe")} {
-					if _, err := os.Stat(candidate); err == nil {
-						editor = candidate
-						break
-					}
-				}
-			}
+	if kind == "reveal" {
+		return revealPath(path)
+	}
+	if kind == "editor" || kind == "vscode" {
+		if kind == "vscode" || editor == "" {
+			editor = findVSCode()
 		}
 		cmd := exec.Command(editor, path)
 		return startExternal(cmd)
@@ -60,6 +55,41 @@ func (d desktop) OpenPath(path, kind, editor string) error {
 	}
 	cmd.Dir = path
 	return startExternal(cmd)
+}
+
+func findVSCode() string {
+	if runtime.GOOS == "windows" {
+		for _, candidate := range []string{filepath.Join(os.Getenv("LOCALAPPDATA"), "Programs", "Microsoft VS Code", "Code.exe"), filepath.Join(os.Getenv("ProgramFiles"), "Microsoft VS Code", "Code.exe")} {
+			if _, err := os.Stat(candidate); err == nil {
+				return candidate
+			}
+		}
+	}
+	return "code"
+}
+
+func revealPath(path string) error {
+	info, err := os.Stat(path)
+	isDir := err == nil && info.IsDir()
+	switch runtime.GOOS {
+	case "windows":
+		if isDir {
+			return startExternal(exec.Command("explorer.exe", path))
+		}
+		return startExternal(exec.Command("explorer.exe", "/select,"+path))
+	case "darwin":
+		args := []string{"-R", path}
+		if isDir {
+			args = []string{path}
+		}
+		return startExternal(exec.Command("open", args...))
+	default:
+		target := path
+		if !isDir {
+			target = filepath.Dir(path)
+		}
+		return startExternal(exec.Command("xdg-open", target))
+	}
 }
 func startExternal(cmd *exec.Cmd) error {
 	if err := cmd.Start(); err != nil {
@@ -83,30 +113,40 @@ func main() {
 		log.Fatal(err)
 	}
 	instanceID := fmt.Sprintf("dev.repoberth.desktop.d%x", sha256.Sum256([]byte(path)))
-	options := application.Options{Name: "Repo Berth", Description: "多账号 Git 仓库工作台", Icon: appIcon, SingleInstance: &application.SingleInstanceOptions{UniqueID: instanceID}, Assets: application.AssetOptions{Handler: application.AssetFileServerFS(assets)}, Mac: application.MacOptions{ApplicationShouldTerminateAfterLastWindowClosed: true}}
+	var mainWindow *application.WebviewWindow
+	var svc *service.Service
+	var updaterReady bool
+	var app *application.App
+	options := application.Options{Name: "Repo Berth", Description: "多账号 Git 仓库工作台", Icon: appIcon, SingleInstance: &application.SingleInstanceOptions{UniqueID: instanceID, OnSecondInstanceLaunch: func(application.SecondInstanceData) {
+		if mainWindow != nil {
+			mainWindow.Show()
+			mainWindow.Focus()
+		}
+		if app != nil {
+			app.Event.Emit("app:second-instance", nil)
+		}
+	}}, Assets: application.AssetOptions{Handler: application.AssetFileServerFS(assets)}, Mac: application.MacOptions{ApplicationShouldTerminateAfterLastWindowClosed: true}}
 	if *debugPort > 0 && *debugPort < 65536 {
 		options.Windows.AdditionalBrowserArgs = []string{fmt.Sprintf("--remote-debugging-port=%d", *debugPort)}
 	}
-	app := application.New(options)
-	updaterReady := configureUpdater(app)
+	app = application.New(options)
+	updaterReady = configureUpdater(app)
 	if runtime.GOOS == "darwin" {
 		installMacMenu(app, func(name string, data any) { app.Event.Emit(name, data) })
 	}
 	// Acquire the native single-instance lock before touching persisted state.
-	svc, err := service.New(path, provider.NewGitHub(), vault.New())
+	svc, err = service.New(path, provider.NewGitHub(), vault.New())
 	if err != nil {
 		showStartupFailure(app, path, err)
 		return
 	}
 	app.RegisterService(application.NewService(svc))
 	service.Attach(svc, desktop{app}, func(name string, data any) { app.Event.Emit(name, data) })
+	mainWindow = app.Window.NewWithOptions(application.WebviewWindowOptions{Title: "Repo Berth · 仓库工作台", Width: 1440, Height: 920, MinWidth: 900, MinHeight: 640, Frameless: runtime.GOOS == "windows", URL: "/"})
 	if updaterReady {
 		service.AttachUpdater(svc, func() { startUpdateCheck(app) })
-		if svc.AutoUpdateEnabled() {
-			go automaticUpdateCheck(app)
-		}
+		attachAutoUpdateTrigger(app, svc.AutoUpdateEnabled)
 	}
-	app.Window.NewWithOptions(application.WebviewWindowOptions{Title: "Repo Berth · 仓库工作台", Width: 1440, Height: 920, MinWidth: 900, MinHeight: 640, Frameless: runtime.GOOS == "windows", URL: "/"})
 	app.OnShutdown(func() { service.Close(svc) })
 	if err = app.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, "应用启动失败:", err)

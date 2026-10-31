@@ -72,6 +72,7 @@ func installMacMenu(app *application.App, emit func(string, any)) {
 	role(view, application.ToggleFullscreen, "切换全屏", "Ctrl+Command+F")
 
 	repository := menu.AddSubmenu("仓库")
+	repository.Add("使用 VS Code 打开项目").OnClick(action("repository.open-vscode"))
 	repository.Add("在文件夹中打开").OnClick(action("repository.open-folder"))
 	repository.Add("在 GitHub 中查看").OnClick(action("repository.open-github"))
 	repository.Add("分享到 GitHub…").OnClick(action("repository.share"))
