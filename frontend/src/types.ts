@@ -166,6 +166,21 @@ export interface WorkingFilePreview {
   data: string;
   size: number;
 }
+export interface CommitBinaryDiff {
+  path: string;
+  oldSize: number;
+  newSize: number;
+  oldHash: string;
+  newHash: string;
+  oldExists: boolean;
+  newExists: boolean;
+  oldData: string;
+  newData: string;
+  firstDifference: number;
+  changedBytes: number;
+  truncated: boolean;
+  windowSize: number;
+}
 export interface FileEntry {
   path: string;
   tracked: boolean;

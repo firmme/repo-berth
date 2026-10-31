@@ -2391,3 +2391,196 @@
   max-height: min(70vh, 520px);
   overflow-y: auto;
 }
+.filebar-language-menu {
+  min-width: 190px;
+  max-height: 270px;
+  overflow-y: auto;
+}
+.desktop-code-preview {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  background: var(--canvas);
+}
+.desktop-code-preview pre {
+  margin: 0;
+  padding: 14px 16px 24px;
+  font-family: Consolas, "SFMono-Regular", monospace;
+  font-size: 12px;
+  line-height: 1.65;
+  tab-size: 4;
+  white-space: pre;
+}
+.desktop-code-preview code {
+  font: inherit;
+}
+.editor-code {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.editor-highlight {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  padding: 10px 12px;
+  overflow: auto;
+  pointer-events: none;
+  background: transparent;
+  color: var(--text);
+  font-family: Consolas, "SFMono-Regular", monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  tab-size: 4;
+  white-space: pre;
+  scrollbar-width: none;
+}
+.editor-highlight::-webkit-scrollbar {
+  display: none;
+}
+.editor-highlight code {
+  font: inherit;
+}
+.editor-code textarea {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  resize: none;
+  padding: 10px 12px;
+  background: transparent;
+  color: transparent;
+  caret-color: var(--text);
+  font-family: Consolas, "SFMono-Regular", monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  tab-size: 4;
+  white-space: pre;
+  overflow: auto;
+  outline: none;
+  box-shadow: none !important;
+}
+.editor-code textarea::selection {
+  background: rgba(9, 105, 218, 0.28);
+}
+.tok-keyword {
+  color: #cf222e;
+}
+.tok-string {
+  color: #0a3069;
+}
+.tok-comment {
+  color: #6e7781;
+  font-style: italic;
+}
+.tok-number {
+  color: #0550ae;
+}
+.tok-property {
+  color: #8250df;
+}
+.tok-tag {
+  color: #116329;
+}
+.tok-attr {
+  color: #0550ae;
+}
+.tok-heading {
+  color: #0969da;
+  font-weight: 600;
+}
+.tok-meta {
+  color: #6e7781;
+}
+.tok-add {
+  color: #1a7f37;
+}
+.tok-del {
+  color: #cf222e;
+}
+.binary-diff-pane {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+.binary-diff-summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--soft-border);
+  background: var(--pane);
+  font-size: 12px;
+}
+.binary-diff-summary strong {
+  font-size: 12px;
+  font-weight: 600;
+}
+.binary-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  padding: 7px 14px;
+  border-bottom: 1px solid var(--soft-border);
+  color: var(--secondary-text);
+  font-size: 11px;
+}
+.binary-hex-view {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 10px 14px 24px;
+  background: var(--canvas);
+  font-family: Consolas, "SFMono-Regular", monospace;
+  font-size: 12px;
+}
+.binary-hex-row {
+  display: flex;
+  gap: 16px;
+  line-height: 1.55;
+  white-space: pre;
+}
+.binary-offset {
+  flex: none;
+  color: var(--secondary-text);
+  user-select: none;
+}
+.binary-hex,
+.binary-ascii {
+  display: flex;
+  gap: 4px;
+  flex: none;
+}
+.binary-byte {
+  color: var(--text);
+}
+.binary-ascii .binary-byte {
+  color: var(--secondary-text);
+}
+.binary-byte.changed {
+  border-radius: 2px;
+  background: rgba(207, 34, 46, 0.18);
+  color: #a40e26;
+}
+:root[data-theme="dark"] .tok-keyword { color: #ff7b72; }
+:root[data-theme="dark"] .tok-string { color: #a5d6ff; }
+:root[data-theme="dark"] .tok-comment { color: #8b949e; }
+:root[data-theme="dark"] .tok-number { color: #79c0ff; }
+:root[data-theme="dark"] .tok-property { color: #d2a8ff; }
+:root[data-theme="dark"] .tok-tag { color: #7ee787; }
+:root[data-theme="dark"] .tok-attr { color: #79c0ff; }
+:root[data-theme="dark"] .tok-heading { color: #58a6ff; }
+:root[data-theme="dark"] .tok-meta { color: #8b949e; }
+:root[data-theme="dark"] .tok-add { color: #7ee787; }
+:root[data-theme="dark"] .tok-del { color: #ff7b72; }
+:root[data-theme="dark"] .binary-byte.changed {
+  background: rgba(255, 123, 114, 0.22);
+  color: #ff7b72;
+}

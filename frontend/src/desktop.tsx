@@ -57,9 +57,17 @@ import {
   type LineEndingRisk,
   type WorkingFileInfo,
   type WorkingFilePreview,
+  type CommitBinaryDiff,
 } from "./types";
 import { rowsFromState, filterRows, type Execute, type Row } from "./catalog";
 import { useUI } from "./ui";
+import {
+  LANGUAGES,
+  detectLanguage,
+  highlightCode,
+  languageLabel,
+  type LanguageId,
+} from "./highlight";
 import {
   Modal,
   Field,
@@ -1549,10 +1557,14 @@ function Worktree({
     [renameError, setRenameError] = useState(""),
     [fileBarSlot, setFileBarSlot] = useState<HTMLElement | null>(null),
     [formatBusy, setFormatBusy] = useState(false),
+    [languageOverrides, setLanguageOverrides] = useState<
+      Record<string, LanguageId>
+    >({}),
     [lineEndingRisks, setLineEndingRisks] = useState<LineEndingRisk[]>(),
     [lineEndingBusy, setLineEndingBusy] = useState(false),
     [lineEndingError, setLineEndingError] = useState("");
   const editorRef = useRef<HTMLTextAreaElement>(null);
+  const editorHighlightRef = useRef<HTMLPreElement>(null);
   const gutterRef = useRef<HTMLPreElement>(null);
   useEffect(() => {
     setFileBarSlot(document.getElementById("desktop-filebar-slot"));
@@ -1673,19 +1685,13 @@ function Worktree({
     setPreviewPath(path);
     setTreeSelected(path);
   };
-  const activateFile = async (item: FileStatus) => {
+  const activateFile = (item: FileStatus) => {
     setTreeSelected(item.path);
     if (isChanged(item)) {
       selectFile(item);
       return;
     }
-    try {
-      const info = await api("InspectWorkingFile", c.id, item.path);
-      if (info.previewKind === "text" && info.editable) await openEditor(item.path);
-      else openPreview(item.path);
-    } catch {
-      await openEditor(item.path);
-    }
+    openPreview(item.path);
   };
   const openEditor = async (path: string) => {
     setMenu(undefined);
@@ -2009,6 +2015,8 @@ function Worktree({
     queryFn: () => api("InspectWorkingFile", c.id, infoPath),
     enabled: tab === "changes" && !!infoPath,
   });
+  const infoLanguage =
+    languageOverrides[infoPath] || detectLanguage(infoPath);
   const preview = useQuery({
     queryKey: ["git", "file-preview", c.id, previewPath],
     queryFn: () => api("ReadWorkingFilePreview", c.id, previewPath),
@@ -2019,6 +2027,15 @@ function Worktree({
         fileInfo.data?.previewKind || "",
       ) &&
       !fileInfo.data?.tooLarge,
+  });
+  const previewText = useQuery({
+    queryKey: ["git", "file-text", c.id, previewPath],
+    queryFn: () => api("GitFileContent", c.id, previewPath),
+    enabled:
+      tab === "changes" &&
+      !!previewPath &&
+      fileInfo.data?.previewKind === "text" &&
+      !!fileInfo.data?.editable,
   });
   useEffect(() => {
     const info = fileInfo.data;
@@ -2118,6 +2135,35 @@ function Worktree({
       historyFilteredStats.insertions -
       historyFilteredStats.deletions,
   );
+  const historyFileInfo = useQuery({
+    queryKey: ["git", "commit-file-info", c.id, commit?.hash, historyFile],
+    queryFn: () =>
+      api("GitCommitFileInfo", c.id, commit!.hash, historyFile),
+    enabled: tab === "history" && !!commit && !!historyFile,
+  });
+  const historyMedia = useQuery({
+    queryKey: ["git", "commit-file-preview", c.id, commit?.hash, historyFile],
+    queryFn: () =>
+      api("GitCommitFilePreview", c.id, commit!.hash, historyFile),
+    enabled:
+      tab === "history" &&
+      !!commit &&
+      !!historyFile &&
+      ["image", "audio", "video"].includes(
+        historyFileInfo.data?.previewKind || "",
+      ) &&
+      !historyFileInfo.data?.tooLarge,
+  });
+  const historyBinary = useQuery({
+    queryKey: ["git", "commit-binary-diff", c.id, commit?.hash, historyFile],
+    queryFn: () =>
+      api("GitCommitBinaryDiff", c.id, commit!.hash, historyFile),
+    enabled:
+      tab === "history" &&
+      !!commit &&
+      !!historyFile &&
+      historyFileInfo.data?.previewKind === "unsupported",
+  });
   const account = st.accounts.find((a) => a.id === accountID),
     profile = effectiveCommitIdentity(
       st,
@@ -2141,6 +2187,8 @@ function Worktree({
   const editingFile = files.find((f) => f.path === editing);
   const editStats = editingFile ? fileStats(editingFile) : { additions: 0, deletions: 0 };
   const editorLineCount = editorText ? editorText.split("\n").length : 1;
+  const editorLanguage =
+    languageOverrides[editing] || detectLanguage(editing);
   const editable = (f?: FileStatus) =>
     !!f && f.worktree !== "D" && f.index !== "D";
   const commitNow = async () => {
@@ -2241,7 +2289,11 @@ function Worktree({
           <FileStatusBar
             info={fileInfo.data}
             busy={formatBusy}
+            language={infoLanguage}
             onChange={changeFormat}
+            onLanguage={(language) =>
+              setLanguageOverrides((old) => ({ ...old, [infoPath]: language }))
+            }
             onOpenDefault={() => openWorking(fileInfo.data!.path, "default")}
             onReveal={() => openWorking(fileInfo.data!.path, "reveal")}
           />,
@@ -2529,12 +2581,44 @@ function Worktree({
                       </button>] : [])];
                     })}
                   </nav>
-                  <DiffViewer
-                    key={commit.hash + historyFile}
-                    text={historyDisplayText}
-                    stats={historyRawStats}
-                    ignored={historyIgnored}
-                  />
+                  {historyFile && historyFileInfo.isPending ? (
+                    <Loading />
+                  ) : historyFile && historyFileInfo.isError ? (
+                    <ErrorNotice message={errorMessage(historyFileInfo.error)} />
+                  ) : historyFile &&
+                    historyFileInfo.data?.previewKind === "unsupported" ? (
+                    <BinaryDiffPane
+                      info={historyFileInfo.data}
+                      diff={historyBinary.data}
+                      loading={historyBinary.isFetching}
+                      error={
+                        historyBinary.isError
+                          ? errorMessage(historyBinary.error)
+                          : ""
+                      }
+                    />
+                  ) : historyFile &&
+                    ["image", "audio", "video"].includes(
+                      historyFileInfo.data?.previewKind || "",
+                    ) ? (
+                    <CommitMediaPreview
+                      info={historyFileInfo.data!}
+                      preview={historyMedia.data}
+                      loading={historyMedia.isFetching}
+                      error={
+                        historyMedia.isError
+                          ? errorMessage(historyMedia.error)
+                          : ""
+                      }
+                    />
+                  ) : (
+                    <DiffViewer
+                      key={commit.hash + historyFile}
+                      text={historyDisplayText}
+                      stats={historyRawStats}
+                      ignored={historyIgnored}
+                    />
+                  )}
                 </div>
               )}
             </>
@@ -2598,32 +2682,55 @@ function Worktree({
                     (_, index) => index + 1,
                   ).join("\n")}
                 </pre>
-                <textarea
-                  ref={editorRef}
-                  aria-label={`编辑 ${editing}`}
-                  value={editorText}
-                  spellCheck={false}
-                  onChange={(e) => {
-                    setEditorText(e.target.value);
-                    updateCursorLine();
-                  }}
-                  onScroll={(e) => {
-                    if (gutterRef.current)
-                      gutterRef.current.scrollTop = e.currentTarget.scrollTop;
-                  }}
-                  onClick={updateCursorLine}
-                  onKeyUp={updateCursorLine}
-                  onSelect={updateCursorLine}
-                  onKeyDown={(e) => {
-                    if (
-                      (e.ctrlKey || e.metaKey) &&
-                      e.key.toLowerCase() === "s"
-                    ) {
-                      e.preventDefault();
-                      void saveEditor();
-                    }
-                  }}
-                />
+                <div className="editor-code">
+                  <pre
+                    ref={editorHighlightRef}
+                    className="editor-highlight"
+                    aria-hidden="true"
+                  >
+                    <code
+                      dangerouslySetInnerHTML={{
+                        __html: highlightCode(
+                          editorText + "\n",
+                          editorLanguage,
+                        ),
+                      }}
+                    />
+                  </pre>
+                  <textarea
+                    ref={editorRef}
+                    aria-label={`编辑 ${editing}`}
+                    value={editorText}
+                    spellCheck={false}
+                    wrap="off"
+                    onChange={(e) => {
+                      setEditorText(e.target.value);
+                      updateCursorLine();
+                    }}
+                    onScroll={(e) => {
+                      if (gutterRef.current)
+                        gutterRef.current.scrollTop = e.currentTarget.scrollTop;
+                      if (editorHighlightRef.current) {
+                        editorHighlightRef.current.scrollTop =
+                          e.currentTarget.scrollTop;
+                        editorHighlightRef.current.scrollLeft =
+                          e.currentTarget.scrollLeft;
+                      }
+                    }}
+                    onClick={updateCursorLine}
+                    onKeyUp={updateCursorLine}
+                    onSelect={updateCursorLine}
+                    onKeyDown={(e) => {
+                      if (
+                        (e.ctrlKey || e.metaKey) &&
+                        e.key.toLowerCase() === "s"
+                      ) {
+                        e.preventDefault();
+                        void saveEditor();
+                      }
+                    }}
+                  />
+                </div>
               </div>
             )}
           </div>
@@ -2632,13 +2739,21 @@ function Worktree({
             path={previewPath}
             info={fileInfo.data}
             preview={preview.data}
-            loading={fileInfo.isPending || preview.isFetching}
+            text={previewText.data}
+            language={infoLanguage}
+            loading={
+              fileInfo.isPending ||
+              preview.isFetching ||
+              previewText.isFetching
+            }
             error={
               fileInfo.isError
                 ? errorMessage(fileInfo.error)
                 : preview.isError
                   ? errorMessage(preview.error)
-                  : ""
+                  : previewText.isError
+                    ? errorMessage(previewText.error)
+                    : ""
             }
             onClose={() => {
               setPreviewPath("");
@@ -3131,17 +3246,23 @@ function formatBytes(size: number) {
 function FileStatusBar({
   info,
   busy,
+  language,
   onChange,
+  onLanguage,
   onOpenDefault,
   onReveal,
 }: {
   info: WorkingFileInfo;
   busy: boolean;
+  language: LanguageId;
   onChange: (encoding: string, lineEnding: string) => void;
+  onLanguage: (language: LanguageId) => void;
   onOpenDefault: () => void;
   onReveal: () => void;
 }) {
-  const [open, setOpen] = useState<"encoding" | "lineEnding" | "">("");
+  const [open, setOpen] = useState<
+    "encoding" | "lineEnding" | "language" | ""
+  >("");
   useEffect(() => {
     if (!open) return;
     const close = (event: PointerEvent) => {
@@ -3153,6 +3274,7 @@ function FileStatusBar({
   if (info.isDir) return null;
   const textEditable =
     info.previewKind === "text" && !info.binary && !info.tooLarge;
+  const textFile = info.previewKind === "text";
   const lineEnding =
     info.lineEnding === "LF" ||
     info.lineEnding === "CRLF" ||
@@ -3165,6 +3287,35 @@ function FileStatusBar({
         {info.path}
       </span>
       <span className="filebar-size">{formatBytes(info.size)}</span>
+      {textFile && (
+        <div className="filebar-format">
+          <button
+            type="button"
+            title="切换代码识别格式（仅影响预览）"
+            onClick={() => setOpen(open === "language" ? "" : "language")}
+          >
+            {languageLabel(language)}
+          </button>
+          {open === "language" && (
+            <div className="filebar-menu filebar-language-menu">
+              {LANGUAGES.map((item) => (
+                <button
+                  type="button"
+                  key={item.id}
+                  className={item.id === language ? "active" : ""}
+                  onClick={() => {
+                    setOpen("");
+                    onLanguage(item.id);
+                  }}
+                >
+                  {item.label}
+                  {item.id === language && <Check size={12} />}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
       <div className="filebar-format">
         <button
           type="button"
@@ -3252,6 +3403,8 @@ function FilePreviewPane({
   path,
   info,
   preview,
+  text,
+  language,
   loading,
   error,
   onClose,
@@ -3262,6 +3415,8 @@ function FilePreviewPane({
   path: string;
   info?: WorkingFileInfo;
   preview?: WorkingFilePreview;
+  text?: string;
+  language: LanguageId;
   loading: boolean;
   error: string;
   onClose: () => void;
@@ -3298,6 +3453,9 @@ function FilePreviewPane({
             <span>{info.encoding}</span>
             <span>{info.lineEnding === "None" ? "无换行" : info.lineEnding}</span>
             <span>{formatBytes(info.size)}</span>
+            {info.previewKind === "text" && (
+              <span>{languageLabel(language)}</span>
+            )}
           </>
         )}
         <span className="editor-actions">
@@ -3358,6 +3516,8 @@ function FilePreviewPane({
         <div className="desktop-preview-media">
           <video controls src={source} />
         </div>
+      ) : info.previewKind === "text" ? (
+        <CodePreview code={text || ""} language={language} />
       ) : (
         <div className="desktop-preview-empty">
           <FileText size={42} strokeWidth={1.3} />
@@ -3368,6 +3528,196 @@ function FilePreviewPane({
             <button onClick={onOpenDefault}>用默认应用打开</button>
           </div>
         </div>
+      )}
+    </div>
+  );
+}
+
+function CodePreview({ code, language }: { code: string; language: LanguageId }) {
+  return (
+    <div className="desktop-code-preview">
+      <pre>
+        <code
+          dangerouslySetInnerHTML={{ __html: highlightCode(code, language) }}
+        />
+      </pre>
+    </div>
+  );
+}
+
+function decodeBase64(value: string) {
+  const binary = atob(value || "");
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index++)
+    bytes[index] = binary.charCodeAt(index);
+  return bytes;
+}
+
+function CommitMediaPreview({
+  info,
+  preview,
+  loading,
+  error,
+}: {
+  info: WorkingFileInfo;
+  preview?: WorkingFilePreview;
+  loading: boolean;
+  error: string;
+}) {
+  const source = preview
+    ? `data:${preview.mimeType};base64,${preview.data}`
+    : "";
+  return (
+    <div className="desktop-preview-pane">
+      <div className="desktop-diff-header">
+        {info.previewKind === "image" ? (
+          <ImageIcon size={16} />
+        ) : info.previewKind === "audio" ? (
+          <Music size={16} />
+        ) : (
+          <Video size={16} />
+        )}
+        <strong>{info.path}</strong>
+        <span>{info.mimeType}</span>
+        <span>{formatBytes(info.size)}</span>
+      </div>
+      {loading ? (
+        <Loading />
+      ) : info.tooLarge ? (
+        <div className="desktop-preview-empty">
+          <FileQuestion size={42} strokeWidth={1.3} />
+          <h2>文件过大</h2>
+          <p>该媒体文件过大，无法在提交历史中内置预览。</p>
+        </div>
+      ) : error ? (
+        <div className="desktop-preview-empty">
+          <FileQuestion size={42} strokeWidth={1.3} />
+          <h2>无法预览此媒体文件</h2>
+          <p>{error}</p>
+        </div>
+      ) : info.previewKind === "image" && source ? (
+        <div className="desktop-preview-media">
+          <img src={source} alt={info.path} />
+        </div>
+      ) : info.previewKind === "audio" && source ? (
+        <div className="desktop-preview-media">
+          <Music size={52} strokeWidth={1.2} />
+          <audio controls src={source} />
+        </div>
+      ) : info.previewKind === "video" && source ? (
+        <div className="desktop-preview-media">
+          <video controls src={source} />
+        </div>
+      ) : (
+        <Loading />
+      )}
+    </div>
+  );
+}
+
+function BinaryDiffPane({
+  info,
+  diff,
+  loading,
+  error,
+}: {
+  info: WorkingFileInfo;
+  diff?: CommitBinaryDiff;
+  loading: boolean;
+  error: string;
+}) {
+  const oldBytes = decodeBase64(diff?.oldData || "");
+  const newBytes = decodeBase64(diff?.newData || "");
+  const displayBytes = newBytes.length ? newBytes : oldBytes;
+  const rows: ReactNode[] = [];
+  const limit = Math.min(displayBytes.length, 16 << 10);
+  for (let offset = 0; offset < limit; offset += 16) {
+    const row = displayBytes.slice(offset, Math.min(limit, offset + 16));
+    const hex: ReactNode[] = [];
+    const ascii: ReactNode[] = [];
+    row.forEach((byte, index) => {
+      const position = offset + index;
+      const changed =
+        !diff?.oldExists ||
+        !diff?.newExists ||
+        position >= oldBytes.length ||
+        oldBytes[position] !== byte;
+      const text = byte >= 32 && byte <= 126 ? String.fromCharCode(byte) : ".";
+      hex.push(
+        <span
+          key={`h:${position}`}
+          className={changed ? "binary-byte changed" : "binary-byte"}
+        >
+          {byte.toString(16).padStart(2, "0")}
+        </span>,
+      );
+      ascii.push(
+        <span
+          key={`a:${position}`}
+          className={changed ? "binary-byte changed" : "binary-byte"}
+        >
+          {text}
+        </span>,
+      );
+    });
+    rows.push(
+      <div className="binary-hex-row" key={offset}>
+        <span className="binary-offset">
+          {offset.toString(16).padStart(8, "0")}
+        </span>
+        <span className="binary-hex">{hex}</span>
+        <span className="binary-ascii">{ascii}</span>
+      </div>,
+    );
+  }
+  return (
+    <div className="binary-diff-pane">
+      <div className="binary-diff-summary">
+        <FileQuestion size={16} />
+        <strong>{info.path}</strong>
+        <span>{info.mimeType || "application/octet-stream"}</span>
+        <span>
+          {diff
+            ? `${diff.oldExists ? formatBytes(diff.oldSize) : "不存在"} → ${
+                diff.newExists ? formatBytes(diff.newSize) : "已删除"
+              }`
+            : formatBytes(info.size)}
+        </span>
+        {diff && (
+          <span className={diff.changedBytes ? "stat-del" : ""}>
+            {diff.changedBytes
+              ? `${diff.changedBytes} 个字节不同`
+              : diff.oldHash && diff.oldHash === diff.newHash
+                ? "文件内容相同"
+                : "前 64 KiB 无差异"}
+          </span>
+        )}
+      </div>
+      {loading ? (
+        <Loading />
+      ) : error ? (
+        <ErrorNotice message={error} />
+      ) : diff ? (
+        <>
+          <div className="binary-meta">
+            <span>
+              旧:{diff.oldExists ? diff.oldHash.slice(0, 12) : "不存在"}
+            </span>
+            <span>
+              新:{diff.newExists ? diff.newHash.slice(0, 12) : "已删除"}
+            </span>
+            {diff.truncated && <span>差异统计基于前 64 KiB</span>}
+            <span>十六进制预览前 16 KiB</span>
+            {diff.firstDifference >= 0 && (
+              <span>首个差异位于 0x{diff.firstDifference.toString(16)}</span>
+            )}
+          </div>
+          <div className="binary-hex-view">
+            {rows.length ? rows : <p className="desktop-list-empty">文件为空</p>}
+          </div>
+        </>
+      ) : (
+        <Loading />
       )}
     </div>
   );

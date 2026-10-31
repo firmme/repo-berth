@@ -159,6 +159,29 @@ func previewKind(path string, data []byte, binaryFile bool) string {
 	return "text"
 }
 
+func buildFileInfo(path string, size int64, data []byte) WorkingFileInfo {
+	text, encoding, binaryFile := decodeText(data)
+	result := WorkingFileInfo{
+		Path:       path,
+		Name:       filepath.Base(path),
+		Size:       size,
+		Encoding:   encoding,
+		LineEnding: "None",
+		Binary:     binaryFile,
+	}
+	if !binaryFile {
+		result.LineEnding = detectLineEnding(text)
+	}
+	result.PreviewKind = previewKind(path, data, binaryFile)
+	result.MIMEType = mime.TypeByExtension(strings.ToLower(filepath.Ext(path)))
+	if result.MIMEType == "" {
+		result.MIMEType = http.DetectContentType(data)
+	}
+	result.Editable = !binaryFile && size <= maxEditableFile
+	result.TooLarge = size > maxEditableFile
+	return result
+}
+
 func (s *Service) InspectWorkingFile(id, file string) (WorkingFileInfo, error) {
 	c, err := s.checkout(id)
 	if err != nil {
@@ -172,17 +195,16 @@ func (s *Service) InspectWorkingFile(id, file string) (WorkingFileInfo, error) {
 	if err != nil {
 		return WorkingFileInfo{}, model.Err("FILE_MISSING", "文件不存在，可能已被删除")
 	}
-	result := WorkingFileInfo{
-		Path:       file,
-		Name:       filepath.Base(file),
-		Size:       info.Size(),
-		IsDir:      info.IsDir(),
-		Encoding:   "None",
-		LineEnding: "None",
-	}
 	if info.IsDir() {
-		result.PreviewKind = "directory"
-		return result, nil
+		return WorkingFileInfo{
+			Path:        file,
+			Name:        filepath.Base(file),
+			Size:        info.Size(),
+			IsDir:       true,
+			Encoding:    "None",
+			LineEnding:  "None",
+			PreviewKind: "directory",
+		}, nil
 	}
 	if info.Mode()&os.ModeSymlink != 0 {
 		return WorkingFileInfo{}, model.Err("NOT_FILE", "请选择普通文件")
@@ -201,21 +223,7 @@ func (s *Service) InspectWorkingFile(id, file string) (WorkingFileInfo, error) {
 	if readErr != nil && readErr != io.EOF && readErr != io.ErrUnexpectedEOF {
 		return WorkingFileInfo{}, model.Err("READ_FAILED", "无法读取文件，请检查权限")
 	}
-	sample = sample[:n]
-	text, encoding, binaryFile := decodeText(sample)
-	result.Binary = binaryFile
-	result.Encoding = encoding
-	if !binaryFile {
-		result.LineEnding = detectLineEnding(text)
-	}
-	result.PreviewKind = previewKind(file, sample, binaryFile)
-	result.MIMEType = mime.TypeByExtension(strings.ToLower(filepath.Ext(file)))
-	if result.MIMEType == "" {
-		result.MIMEType = http.DetectContentType(sample)
-	}
-	result.Editable = !binaryFile && info.Size() <= maxEditableFile
-	result.TooLarge = info.Size() > maxEditableFile
-	return result, nil
+	return buildFileInfo(file, info.Size(), sample[:n]), nil
 }
 
 func (s *Service) ReadWorkingFilePreview(id, file string) (WorkingFilePreview, error) {

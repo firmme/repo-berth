@@ -14,6 +14,7 @@ import type {
   LineEndingRisk,
   WorkingFileInfo,
   WorkingFilePreview,
+  CommitBinaryDiff,
 } from "./types";
 import { emptyState } from "./types";
 
@@ -96,6 +97,17 @@ interface Methods {
   GitHistory: (id: string) => Commit[];
   GitCommitDiff: (id: string, hash: string) => string;
   GitCommitDiffFiltered: (id: string, hash: string) => string;
+  GitCommitFileInfo: (id: string, hash: string, file: string) => WorkingFileInfo;
+  GitCommitFilePreview: (
+    id: string,
+    hash: string,
+    file: string,
+  ) => WorkingFilePreview;
+  GitCommitBinaryDiff: (
+    id: string,
+    hash: string,
+    file: string,
+  ) => CommitBinaryDiff;
   CheckLineEndingRisks: (id: string, files: string[]) => LineEndingRisk[];
   FixLineEndings: (id: string, files: string[]) => void;
   GitBranches: (id: string) => Branch[];
