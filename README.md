@@ -1,130 +1,54 @@
 # Repo Berth
 
-基于 **Wails 3.0.0 + Go + React / TypeScript** 的多账号 Git 仓库桌面工具。首版支持 GitHub，支持个人账号与工作账号同时登录；访问账号按本地副本与 remote 记录，提交姓名、邮箱使用默认信息或项目专属设置。
+基于 **Wails 3.0.0 + Go + React / TypeScript** 的多账号 Git 仓库桌面工具，目前支持 GitHub。每个本地副本可以独立绑定访问账号与提交身份，仓库 owner 不会用于推断当前登录账号。
 
-## 运行
+## 功能
 
-0.2.12：文本预览、Diff 和编辑器支持自动换行，编辑器改为带行号的语法高亮覆盖层；变更文件和历史文件支持统一差异与双栏并排差异切换；分支菜单改为真正左对齐并修正虚拟目录缩进；文件右键菜单的新建、复制改为二级菜单并加入分隔线，复制菜单新增绝对路径，菜单位置限制在窗口内；新建路径以 `/` 或 `\` 结尾时创建目录；移除账号切换菜单底部说明。
+- 多账号 GitHub 授权、重新授权、会话级凭据、提交姓名与邮箱配置。
+- 云端仓库同步、访问关系合并、搜索、收藏、分组和最近访问。
+- 本地仓库导入、目录扫描、多个本地副本、worktree 与普通目录管理。
+- 变更/全部文件树、暂存、提交、分支切换、Fetch / Pull / Push、提交历史。
+- 文件编码与换行符状态栏、文本/图片/音频/视频/二进制预览。
+- 文件树复制、剪切、删除、重命名、新建文件或目录、终端与 VS Code 打开。
+- 统一 Diff、双栏 Diff、语法高亮、自动换行和带行号编辑器。
+- 应用内自更新。更新器只使用 GitHub Release 中的 `*-update.zip` 资产。
 
-0.2.11：新增文件编码/换行符状态栏与切换、图片/音频/视频及二进制差异预览、全文件树语法高亮文本预览和编辑器着色；文件树支持复制/剪切/删除/重命名/新建同级或子级、打开终端与 VS Code；分支菜单按本地/远程分组并高亮当前分支；提交历史增加类型、合并、Tag、发布彩色标签，历史文件状态栏只读显示文件信息；账号需重新授权时头像显示黄色标记，前台切换自动刷新状态并显示最新同步时间。
+## 下载
 
-0.2.10：应用图标替换为四色仓库标志，同步更新 macOS、Windows 和应用内图标，保留透明背景。
+- Windows：`RepoBerth-<version>-windows-amd64.zip`，解压后运行 `RepoBerth.exe`。需要 Git 与 WebView2。
+- macOS Apple Silicon：`RepoBerth-<version>-macos-arm64.zip`。
+- 发行页同时提供完整包和应用内更新包；两者用途不同，见下方“发布资产”。
 
-0.2.9：应用图标更新为高饱和蓝色 Git 分支标识，并按 macOS 标准图标网格预留透明边距，使 Dock 和应用程序图标与系统应用比例一致。
+版本历史、下载地址和校验值请查看 [GitHub Releases](https://github.com/firmme/repo-berth/releases)。
 
-0.2.8：新增应用内自更新。启动后会自动检查 GitHub Releases，发现新版本时下载并准备替换；主菜单新增“更新 → 检查更新…”可随时手动检查。更新资产使用独立的 `-update.zip` / `-update.tar.gz`，下载后由 Wails v3 更新器完成校验、替换和重启。历史页显示每个提交的文件数与新增/删除行数，文件树按变更类型着色。macOS 使用系统原生菜单栏。
+## 构建
 
-0.2.7：变更页提供“变更 / 全部”切换：变更树显示修改文件，全部树列出仓库中已跟踪和未忽略的文件；均可右键暂存/取消暂存、新建文件、添加到 .gitignore、移除 Git 跟踪、复制路径。支持应用内编辑文本文件，显示行号、光标行和每个文件/目录的新增/删除行数。历史页显示每个提交的文件数与新增/删除行数；macOS 使用原生菜单栏。修复本地分享创建、尚未同步云端列表的仓库无法使用“在 GitHub 中查看”的问题；现在直接按当前 remote 打开 GitHub 页面。已关联 GitHub 的仓库不再显示灰色的“分享到 GitHub…”项。Windows 直接运行 `bin/0.2.7/RepoBerth.exe`。
-
-0.2.6：视图菜单支持跟随系统、日间和暗黑主题，选择保存在本机；历史提交使用紧凑列表、相对时间和可折叠文件树。工作区列表与仓库菜单使用一致的主题表面、可读的次要文字，以及明确的悬浮和选中状态。文件暂存即时显示选择结果，批量暂存由单次 Git 操作完成。文件菜单的“克隆仓库”可直接填写 GitHub HTTPS 地址，公开仓库无需登录，私有仓库选择已授权账号；账号授权码会自动尝试复制到剪贴板。仓库菜单可将当前本地仓库分享到 GitHub：为所选账号创建新仓库、添加 origin 并推送当前分支，可选择公开或私有；授权已包含推送工作流文件所需的 workflow 权限。启动时默认打开上次使用的仓库，仓库列表按最近使用排序，并按仓库名称生成浅色渐变首字母图标；配置了 remote 的仓库会显示本地未推送与远端待拉取的提交数量，Fetch 后刷新。Windows 直接运行 `bin/0.2.6/RepoBerth.exe`。
-
-0.2.5：访问账号选择仅设置当前 Git 操作账号，不再切换本地副本或打开仓库列表。选择会持久记作默认账号；仓库显式绑定优先，其次是根据 remote 与唯一已同步访问记录的自动关联，否则使用默认账号。自动关联不会按仓库 owner 猜测登录账号，多账号均可访问时使用默认值。顶部标注来源，仓库设置展示远程 owner/name；访问账号与提交信息独立。Windows 直接运行 `bin/0.2.5/RepoBerth.exe`。
-
-0.2.4：按用户要求移除目录信任确认、弹窗、API 与单独的信任名单。主动导入及两层扫描发现的 Git 仓库直接读取；已管理仓库继续正常操作。所有者兼容仅通过当前 Git 进程的具体仓库根路径实现，不写全局配置、不改变文件所有者。Windows 直接运行 `bin/0.2.4/RepoBerth.exe`。
-
-0.2.3：修复配置隔离误忽略已设置的 `safe.directory`。遇到所有者检查失败时，仅从系统/全局配置中读取目录信任项并传给当前 Git 进程，仍隔离提交身份、凭据助手及 URL 重写。不在信任名单中的目录明确显示“目录所有者不一致”，可在扫描任务中查看具体目录并确认仅由 Repo Berth 信任后重扫；不修改全局配置，不自动信任整个扫描根目录。Windows 直接运行 `bin/0.2.3/RepoBerth.exe`。
-
-0.2.2：菜单左对齐；仓库筛选使用带类型图标和账号头像的菜单，区分本地 Git、云端与普通目录。账号切换、账号管理和提交区显示授权时保存的 GitHub 头像，加载失败回退为用户名缩写。Windows 默认交付单个 `bin/0.2.2/RepoBerth.exe`，可直接运行，无需 ZIP。
-
-0.2.1：设置新增默认提交姓名和邮箱；仓库设置可指定项目专属信息，未覆盖时继承默认值，修改默认值会作用于所有继承项目。尚未设置默认值时兼容已有绑定身份。历史行高随内容展开；单独导入非 Git 目录需确认，并标记为普通目录。扫描仅检查所选目录及其下两层，仅导入 Git 仓库。“文件 → 管理本地目录”支持筛选、多选、批量移出管理，保留全部文件与 Git 历史。
-
-0.2.0 按 GitHub Desktop 的工作顺序重新设计：顶部仓库/分支/Fetch 工具栏，左侧变更与历史、底部提交表单，右侧文本差异或干净工作区。右上角增加多账号切换；每个本地副本独立绑定访问账号与提交身份，仓库设置和任务中心按需打开。
-
-正常发行版应由应用内置 GitHub 登录配置，使用者点击“添加 GitHub 账号”即可浏览器授权，无需注册 OAuth App 或填写 Client ID。
-
-0.1.1 已内置 Repo Berth 自己的公开 GitHub OAuth 应用标识，普通设置页不再包含 Client ID。旧版 0.1.0 缺少应用配置，请退出旧程序后使用新版；账号和本地仓库数据保存在原用户数据目录中。
-
-Windows 包无需安装 Go 或 Node，仍需 Git 和 WebView2。包内包含使用说明、验收记录、构建与依赖清单及第三方许可文本。应用数据继续保存在系统用户目录，不随程序目录移动。
-
-从源码生成与核验解压包：`node scripts/package-windows.mjs`，然后执行 `node scripts/verify-package.mjs`。核验会检查 ZIP 校验值、文件白名单和许可文件哈希，并在隔离数据目录中运行解压后的程序，验证启动恢复和本地 Git 工作流。CI 使用 `--no-native` 跳过需要桌面的原生验证，不把它当作实机通过。
-
-自更新使用独立资产：构建后运行 `node scripts/package-update.mjs`，把生成的 `bin/releases/*-update.zip`（Linux 为 `.tar.gz`）及其 `.sha256` 一并上传到 GitHub Release。更新包只包含一个顶层可执行文件或 `.app`，不能使用带说明文档和许可目录的完整发行包。
-
-从源码构建需要 Go **1.27.2 或更新版本**、Node.js **24** 和已安装的 Git（建议 2.43+）。依赖版本由 `go.sum` 和 `frontend/package-lock.json` 固定。开发者配置见 [DEVELOPER_SETUP.md](DEVELOPER_SETUP.md)，这不是最终用户的登录步骤。
+需要 Go **1.27.2+**、Node.js **24** 和 Git。依赖版本由 `go.sum` 与 `frontend/package-lock.json` 固定。
 
 ```powershell
 npm ci --prefix frontend
 node scripts/build.mjs
-.\bin\0.2.1\RepoBerth.exe
+.\bin\<version>\RepoBerth.exe
 ```
 
-构建脚本会先构建前端，再将静态资源嵌入 Go 二进制；无需单独安装 Wails CLI。开发时重新执行前端构建后使用 `go run .`。`npm run dev --prefix frontend` 只提供浏览器界面预览，不模拟 Git / 账号操作。
+Windows 构建需要 MinGW `windres` 生成 EXE 图标资源，可通过 `WINDRES` 指定路径。macOS 需要 Xcode Command Line Tools；Linux 需要 GTK4、WebKitGTK 6.0、X11 和 Secret Service。开发配置见 [DEVELOPER_SETUP.md](DEVELOPER_SETUP.md)。
 
-- Windows：依赖 Microsoft Edge WebView2 Runtime，输出 `bin/0.2.1/RepoBerth.exe`；构建时需 MinGW `windres` 生成 EXE 图标资源，可通过 `WINDRES` 指定编译器路径。
-- macOS：需要 Xcode Command Line Tools 和系统 WebKit，输出未签名的 `bin/0.2.1/Repo Berth.app`。
-- Linux：需要 GTK4、WebKitGTK 6.0、X11 和 Secret Service。Ubuntu 24.04 构建依赖：`sudo apt-get install libgtk-4-dev libwebkitgtk-6.0-dev libx11-dev pkg-config`。输出 `bin/0.2.1/repo-berth`，在有图形桌面和会话 D-Bus 的环境中运行。
+## 发布资产
 
-macOS / Linux 的构建与测试已配置到 `.github/workflows/ci.yml`，本机没有对这两个平台做原生运行验证。公开分发前仍需各平台实测、签名、公证和安装包工作。
+每个版本需要两类资产：
 
-## GitHub 浏览器授权
+- **完整包**：包含应用、README、验收记录和第三方许可，用于手动下载安装。
+- **更新包**：只包含一个顶层可执行文件或 `.app`，供 Wails v3 更新器替换使用。
 
-1. 在已配置登录的应用版本中打开“账号与身份”，点击添加账号，将应用显示的验证码填入系统浏览器中的 GitHub 页面。
-2. 添加第二个账号时确认浏览器当前登录的身份。
-3. 为每个账号明确确认提交姓名和邮箱。邮箱可以从 GitHub 已验证邮箱中选择，也可以手动填写，包括你自己的 GitHub noreply 邮箱。
-4. 同步仓库，然后克隆；导入已有仓库时，在详情的“配置”中明确绑定 remote、访问账号和提交身份。
+两者不能合并：更新器要求更新包只有一个顶层条目，而完整包必须包含文档和许可文件。发布时运行：
 
-请求权限为 `repo workflow read:user user:email`。`repo` 是 GitHub OAuth 的较宽读写权限，`workflow` 允许推送包含 `.github/workflows` 的仓库。组织仓库还可能要求管理员批准 OAuth App 或完成 SSO 授权。实际令牌过期或被撤销时，重新授权该账号；首版不实现 refresh token 自动续期。
-
-授权默认保存到系统凭据库。如果浏览器授权已完成，但本地保存失败，应用会在 Go 内存中保留这次授权最多 10 分钟，供你重试保存或选择仅本次会话保存，不必重复浏览器授权。取消、退出应用或移除对应账号会丢弃未保存的授权；它不会写入数据库或传给前端。
-
-重新授权和切换保存模式保留原账号 ID、备注及仓库绑定。新凭据使用独立引用，数据库提交成功后才清理旧凭据；清理未能完成时，账号页和设置页会显示待清理数量并提供重试。移除账号也采用可恢复的清理记录，系统库锁定时不会静默声称凭据已清理。GitHub 网站上的应用授权需要到 GitHub 设置中另行撤销。
-
-## 已实现
-
-- 多账号授权、重复账号去重、授权失效时重新授权及本地移除。每个账号保存一组提交姓名和邮箱，项目可以单独覆盖。
-- 云端仓库分页同步、跨账号访问关系合并、搜索、owner / 可见性 / 账号筛选。
-- 本地导入、目录扫描（最多两层，不跟随目录符号链接，跳过依赖目录）、同仓库多个本地副本。支持 Git worktree 的 `.git` 文件；发现仓库后不继续扫描其内部目录，嵌套的独立仓库可单独导入。
-- 扫描遇到损坏 Git 元数据或含内嵌凭据的 remote 会保留安全的跳过原因，继续发现其他仓库。任务中心显示导入/更新数量和最多 20 条跳过详情；修复后重扫会更新已有记录，不重复创建。数据库写入失败会立即停止，不当作普通跳过项。
-- 收藏、分组、最近访问、文件夹 / 终端 / 编辑器 / GitHub 网页入口。
-- 本地副本首次关联云端条目时，将收藏、分组与最近访问合并到统一仓库条目，多个副本的同组成员会去重；重复导入、同步和重启不会恢复已取消的收藏。已有记录也会在启动时修复。匹配多个 remote 时优先 origin，不自动推断访问账号。
-- 本地副本可“移出管理”：清理目录记录和绑定，但保留全部文件及 Git 历史；有未完成任务时会要求先处理任务。
-- 账号提交信息可以编辑；旧版同一账号保存的多套身份在编辑时收敛为一套，旧项目使用的不同署名转为项目覆盖。排队期间身份变化时，提交和网络任务会要求重新确认。
-- HTTPS 克隆、阶段百分比、取消、失败重试；临时目录内克隆，失败不占用用户选择的最终目录。
-- 克隆任务保留访问账号、提交身份和目标目录，应用重启后仍可恢复到重试确认表单；原账号或身份已移除时要求重新选择，不会自动换成第一个账号。已有目录不会被覆盖。旧版本任务缺少这些字段时沿用新建克隆表单。
-- 本地状态、分支与上游、领先 / 落后数量、文本 diff、按文件暂存与取消暂存、提交、分支新建切换和最近 50 条提交。
-- 同一仓库的不同本地副本分别保留本次会话的提交草稿；切换副本会重置差异选择。提交失败保留草稿，任务真正成功后才清除已提交的原文，不清除期间新写的内容。草稿目前不跨应用重启保存。
-- 任务中心可直接定位到任务对应的本地副本，并清除妨碍定位的列表筛选；查看任务不会自动重复提交或推送。
-- 账号筛选同时包含云端访问记录与本地副本绑定；仓库不再出现在账号的同步列表中时，本地副本仍可找到。授权失效时详情提供账号管理入口，暂停网络按钮，本地查看与提交不受影响。
-- 从账号筛选打开仓库时，优先展示该账号绑定的本地副本及 remote；新建克隆也预选当前筛选账号。没有该账号的云端访问记录时要求先同步或明确选另一个账号，不静默切换默认账号。
-- remote 选择按本地副本隔离。选中的 remote 被外部删除或改名时，要求重新选择，不自动改用另一 remote 的身份；状态读取、刷新或失败期间暂停网络操作。
-- Fetch / Pull / Push；Pull 固定 `--ff-only --no-rebase`，Push 使用明确且不含 force 的单分支 refspec。
-- 后台任务、取消、有限并发、同工作目录写操作串行、重启中断恢复、脱敏阶段日志。
-- 等待仓库/账号锁的任务可及时取消，浏览器授权不会占满 Git 工作槽位；任务意外异常会被隔离。Git 文本输出超过 4 MiB 时明确提示，不静默截断。
-
-SSH 仓库可以导入并查看本地状态，但网络操作需要用户明确转换 GitHub remote 为 HTTPS。有独立 push URL 的 remote 不会被自动转换。应用内提交不启用 GPG / SSH 签名。首版不递归克隆 submodule，Git LFS 内容保留 pointer，不自动下载 LFS 对象；可以使用外部工具处理这些功能。
-
-## 身份与凭据边界
-
-`Account` 表示平台登录；`CommitProfile` 表示提交署名；`RepositoryBinding` 以本地副本和 remote 为单位把两者连接起来。仓库 owner 不用于推断当前登录身份。
-
-- Token 只进入 Go 内存及系统凭据库，不进入 React、SQLite、remote URL、命令行参数或日志。
-- 每个网络命令启动独立的 loopback 凭据通道，使用随机短期 nonce；凭据助手只响应匹配协议、主机和仓库路径的请求。
-- Git 使用进程级凭据助手，清空系统助手链；不写全局 Git 配置，不把 GitHub Token 放入子进程环境变量。
-- 隔离继承的 `GIT_*` 环境变量及全局 / 系统 Git 配置，防止身份和 URL 重写串用。仓库本身的配置继续生效；需要代理时可使用标准代理环境变量或仓库配置。
-- 外部终端和 IDE 继续使用自身配置。应用内账号绑定不自动覆盖这些工具的凭据。
-- 同一数据目录限制为一个应用实例。
-
-## 代码结构
-
-```text
-main.go                 Wails 入口、原生目录选择及外部工具
-internal/model          数据与错误类型
-internal/store          SQLite、版本表、原子集合快照
-internal/vault          系统凭据库与会话保存
-internal/provider       Provider 接口及 GitHub API / Device Flow
-internal/gitexec        Git 参数执行、凭据 IPC、进程取消、状态解析
-internal/service        账号 / 仓库 / Git / 任务业务与 Wails 接口
-frontend/src            React 工作台、类型化桥接、查询缓存与界面状态
-scripts                 构建与原生桌面冒烟检查
+```powershell
+node scripts/package-windows.mjs
+node scripts/package-update.mjs
+node scripts/verify-package.mjs
 ```
 
-SQLite 首版按业务集合分别建表，每个集合保存 JSON 快照；多集合变更在同一事务内提交，失败时回滚内存状态。账户密钥只保存引用。数据量很大时可将热点查询迁移成逐行关系表；当前设计面向个人的数百个仓库。
-
-当前数据库 schema 为 v2，启动时自动从 v1 增加凭据清理日志，保留已有账号。日志只保存不含 Token 的凭据引用，启动时重试清理未完成的记录。数据库损坏、权限异常或版本不兼容时，会打开启动恢复窗口并显示数据位置，不自动删除数据文件。
-
-未变化的集合不会因任务进度更新而重写。应用拒绝打开较新版本的数据库；任务已完成但状态保存失败时保留真实终态并提示未保存，避免误导用户重复执行操作。持续完善与未完成的验收项目见 [PRODUCT_AUDIT.md](PRODUCT_AUDIT.md)。
-
-数据库位置：Windows `%APPDATA%/RepoBerth/berth.db`，macOS `~/Library/Application Support/RepoBerth/berth.db`，Linux `$XDG_CONFIG_HOME/RepoBerth/berth.db`（默认 `~/.config`）。任务日志只记录固定阶段文本、百分比和经过分类的错误；不持久化 Git 原始 stderr。
+macOS 同理生成 `*-macos-*-update.zip`。所有压缩包同时上传对应的 `.sha256`。
 
 ## 验证
 
@@ -135,19 +59,28 @@ go vet ./...
 npm test --prefix frontend
 ```
 
-竞态测试：`go test -race ./...`，需要可用的 C 编译器。Windows 的本次验证使用 `C:/msys64/mingw64/bin/gcc.exe`，并将同目录加入 PATH。根包的测试包含启动恢复页面，需要先构建前端以提供嵌入资源。
+Windows 发行包使用 `node scripts/verify-package.mjs --no-native` 做压缩包、文件白名单和第三方许可校验。CI 在 Windows、macOS 和 Ubuntu 上运行构建与测试。
 
-`go test ./internal/gitexec -run TestHTTPSDualAccountTransport -count=1 -v` 可单独运行真实 HTTPS 传输测试：临时 TLS 证书、仅允许 GitHub 目标的本地 CONNECT 代理及 Git 自带的 `git-http-backend`。两个合成账号并发克隆、提交、推送和拉取，并验证跨账号/撤销令牌拒绝；不修改 hosts、系统证书库或全局 Git 配置，也不访问真实 GitHub。需要 Git 安装包含 `git-http-backend`。此测试覆盖本地传输链路，真实 GitHub Device Flow、私有仓库权限与组织 SSO 仍需实际授权验收。
+## 数据与安全
 
-Windows 下可执行 `node scripts/smoke-workspace.mjs bin/0.2.1/RepoBerth.exe` 检查当前发行版。它以独立的合成双账号数据和两个真实本地 Git 副本，验证仓库选择、账号及草稿隔离、暂存、锁文件导致的提交失败与恢复、实际署名、提交历史差异、新建分支、克隆重试确认和三种窗口宽度；不使用真实凭据或发起仓库网络操作。
+- Token 只存在于 Go 内存和系统凭据库，不进入 React、SQLite、remote URL、命令行参数或日志。
+- 每个网络命令使用独立 loopback 凭据通道和随机 nonce。
+- Git 子进程隔离继承的 `GIT_*`、系统/全局配置和凭据助手链；应用不写全局 Git 配置。
+- 应用内提交不启用 GPG / SSH 签名，不递归克隆 submodule，不自动下载 Git LFS 对象。
+- 数据库位置：Windows `%APPDATA%/RepoBerth/berth.db`，macOS `~/Library/Application Support/RepoBerth/berth.db`，Linux `$XDG_CONFIG_HOME/RepoBerth/berth.db`。
 
-系统凭据库集成测试默认不在无桌面的 CI 中运行。Windows 本次实际验证命令为设置 `BERTH_KEYRING_INTEGRATION=1` 后运行 `go test ./internal/vault -count=1 -v`，测试使用独立随机引用的合成值，并在结束时清理。
+更完整的产品边界与验收记录见 [PRODUCT_AUDIT.md](PRODUCT_AUDIT.md)。
 
-自动测试覆盖：真实 Git 凭据助手的两个账号隔离、错误仓库 / nonce 拒绝、中文与带空格路径、文件名的 literal pathspec、提交 author / committer 覆盖、全局配置不变、首次提交前取消暂存、重命名、脏工作区切分支保护、分叉 Pull / Push 不改变本地历史、Device Flow 轮询减速 / 拒绝 / 过期、分页去重、重授权账号校验、凭据不落盘、共享仓库访问关系和账号移除保留文件。
+## 代码结构
 
-Windows 原生 WebView 冒烟检查：运行 `node scripts/smoke-workspace.mjs bin/0.2.1/RepoBerth.exe`。脚本自行创建隔离数据目录并启停测试进程；调试端口仅用于验证，普通启动不会开放。旧的 `smoke-desktop.mjs` / `smoke-clone-retry.mjs` 保留为 0.1.x 界面的历史验证脚本。
-
-`node scripts/smoke-startup.mjs` 在独立数据目录创建损坏的 SQLite 样本，验证应用展示原生恢复窗口而不是静默退出，并核对原文件字节未变。
-
-**仍需真实账号验收**：发行方完成应用注册并构建后，分别添加两个 GitHub 账号，克隆两个私有仓库，提交并推送；检查提交署名和仓库归属。此场景需要用户在浏览器授权，本次没有使用或伪造真实 GitHub 凭据。
-
+```text
+main.go              Wails 入口、原生目录选择和外部工具
+internal/model       共享数据类型
+internal/store       SQLite 存储
+internal/vault       系统凭据库和会话凭据
+internal/provider    GitHub API / Device Flow
+internal/gitexec     Git 执行、凭据隔离、状态与历史
+internal/service     账号、仓库、Git 和任务业务逻辑
+frontend/src         React 桌面界面
+scripts              构建、打包和验证脚本
+```

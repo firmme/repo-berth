@@ -2983,3 +2983,19 @@
   box-sizing: border-box;
   padding-right: 10px;
 }
+.desktop-diff.wrap .diff-table {
+  width: auto;
+  min-width: 0;
+}
+.desktop-diff.wrap .diff-line {
+  white-space: normal;
+}
+.desktop-diff.wrap .diff-line code {
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.split-diff.wrap .split-diff-body {
+  min-width: 0;
+}

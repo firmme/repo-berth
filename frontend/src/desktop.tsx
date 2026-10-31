@@ -29,6 +29,7 @@ import {
   Square,
   Github,
   Folder,
+  Files,
   FilePlus2,
   Pencil,
   EyeOff,
@@ -80,6 +81,28 @@ import {
   AccountAvatar,
   RepositoryMark,
 } from "./components";
+import { DiffViewer, SplitDiffView, diffStats, diffChangeKind } from "./diff-view";
+import { BranchTreeView } from "./branch-tree";
+import { commitPills } from "./commit-labels";
+import {
+  BinaryDiffPane,
+  CommitMediaPreview,
+  FilePreviewPane,
+  FileStatusBar,
+} from "./file-preview";
+import {
+  absoluteWorkingPath,
+  buildFileTree,
+  fileStats,
+  findTreeNode,
+  flattenTree,
+  hasStaged,
+  hasUnstaged,
+  parentPath,
+  treeStats,
+  type FileTreeNode,
+} from "./file-tree";
+export { DiffViewer } from "./diff-view";
 import { ScopePicker } from "./scope-picker";
 import { AccountsView, SettingsView } from "./settings";
 import { BindingModal, CloneForm, CloneURLForm, ShareForm } from "./repository";
@@ -2404,6 +2427,7 @@ function Worktree({
             className={tab === "changes" ? "active" : ""}
             onClick={() => setTab("changes")}
           >
+            <FileText size={14} />
             变更{files.length > 0 && <span>{files.length}</span>}
           </button>
           <button
@@ -2412,6 +2436,7 @@ function Worktree({
             className={tab === "history" ? "active" : ""}
             onClick={() => setTab("history")}
           >
+            <Clock3 size={14} />
             历史
           </button>
         </div>
@@ -2422,12 +2447,14 @@ function Worktree({
                 className={fileView === "changes" ? "active" : ""}
                 onClick={() => setFileView("changes")}
               >
+                <FileText size={13} />
                 变更
               </button>
               <button
                 className={fileView === "all" ? "active" : ""}
                 onClick={() => setFileView("all")}
               >
+                <Files size={13} />
                 全部
               </button>
             </div>
@@ -2690,7 +2717,7 @@ function Worktree({
                 <div className="desktop-history-content">
                   <nav className="desktop-history-tree" aria-label="提交文件树">
                     <div className="history-tree-heading">文件变更 <span>{historyFiles.length}</span></div>
-                    <button className={!historyFile ? "selected" : ""} onClick={() => setHistoryFile("")}>全部文件</button>
+                    <button className={!historyFile ? "selected" : ""} onClick={() => setHistoryFile("")}>\n                      <Files size={14} />\n                      全部文件\n                    </button>
                     {historyFiles.flatMap(({ path, kind }, index) => {
                       const parts = path.split("/");
                       const folders = parts.slice(0, -1);
@@ -3363,9 +3390,15 @@ function Worktree({
             )}
             <div className="form-actions">
               <button type="button" onClick={() => setNewFileOpen(false)}>
+                <X size={14} />
                 取消
               </button>
               <button className="primary" disabled={!newFileName.trim()}>
+                {newEntryIsDirectory ? (
+                  <FolderPlus size={14} />
+                ) : (
+                  <FilePlus2 size={14} />
+                )}
                 {newEntryIsDirectory ? "创建目录" : "创建文件"}
               </button>
             </div>
@@ -3400,12 +3433,14 @@ function Worktree({
                 type="button"
                 onClick={() => setRenameTarget(undefined)}
               >
+                <X size={14} />
                 取消
               </button>
               <button
                 className="primary"
                 disabled={!renameName.trim() || renameName === renameTarget.name}
               >
+                <Pencil size={14} />
                 重命名
               </button>
             </div>
@@ -3415,117 +3450,6 @@ function Worktree({
     </div>
   );
 }
-type FileTreeNode = {
-  name: string;
-  path: string;
-  isDir: boolean;
-  file?: FileStatus;
-  children: FileTreeNode[];
-};
-
-function parentPath(path: string) {
-  const index = path.lastIndexOf("/");
-  return index < 0 ? "" : path.slice(0, index);
-}
-
-function absoluteWorkingPath(root: string, path: string) {
-  if (!path) return root;
-  const separator = root.includes("\\") ? "\\" : "/";
-  return `${root.replace(/[\\/]+$/, "")}${separator}${path.replace(/\//g, separator)}`;
-}
-
-function findTreeNode(
-  nodes: FileTreeNode[],
-  path: string,
-): FileTreeNode | undefined {
-  for (const node of nodes) {
-    if (node.path === path) return node;
-    const found = findTreeNode(node.children, path);
-    if (found) return found;
-  }
-  return undefined;
-}
-
-function formatBytes(size: number) {
-  if (size < 1024) return `${size} B`;
-  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KiB`;
-  return `${(size / (1024 * 1024)).toFixed(1)} MiB`;
-}
-
-const commitTypeLabels: Record<string, string> = {
-  feat: "功能",
-  fix: "修复",
-  hotfix: "修复",
-  docs: "文档",
-  style: "样式",
-  refactor: "重构",
-  perf: "性能",
-  test: "测试",
-  build: "构建",
-  ci: "CI",
-  chore: "杂项",
-  revert: "回滚",
-  release: "发布",
-};
-
-type CommitPill = { key: string; label: string; className: string; title: string };
-
-function commitPills(commit: Commit): CommitPill[] {
-  const pills: CommitPill[] = [];
-  const typeMatch = /^([a-zA-Z]+)(?:\([^)]*\))?!?:/.exec(commit.subject);
-  const type = typeMatch?.[1]?.toLowerCase() || "";
-  if (commitTypeLabels[type]) {
-    pills.push({
-      key: `type:${type}`,
-      label: commitTypeLabels[type],
-      className: `commit-pill type-${type}`,
-      title: `提交类型：${type}`,
-    });
-  }
-  if (commit.parents > 1) {
-    pills.push({
-      key: "merge",
-      label: "合并",
-      className: "commit-pill merge",
-      title: "合并提交",
-    });
-  }
-  const tags = commit.tags || [];
-  const release =
-    type !== "release" &&
-    (/^(?:chore\()?release(?:\)[^:]*)?!?:/i.test(commit.subject) ||
-      tags.some(
-        (tag) =>
-          /release/i.test(tag) ||
-          /^v?\d+(?:\.\d+){1,2}(?:[-+].*)?$/i.test(tag),
-      ));
-  if (release) {
-    pills.push({
-      key: "release",
-      label: "发布",
-      className: "commit-pill release",
-      title: "发布版本",
-    });
-  }
-  tags.slice(0, 2).forEach((tag) =>
-    pills.push({
-      key: `tag:${tag}`,
-      label: tag,
-      className: "commit-pill tag",
-      title: `标签：${tag}`,
-    }),
-  );
-  if (tags.length > 2) {
-    pills.push({
-      key: "tag-more",
-      label: `+${tags.length - 2}`,
-      className: "commit-pill tag",
-      title: tags.slice(2).join(", "),
-    });
-  }
-  return pills;
-}
-
 function formatSyncTime(value: string) {
   if (!value) return "";
   const date = new Date(value);
@@ -3537,559 +3461,6 @@ function formatSyncTime(value: string) {
     hour: "2-digit",
     minute: "2-digit",
   });
-}
-
-function FileStatusBar({
-  info,
-  busy,
-  language,
-  wordWrap,
-  readOnly = false,
-  onChange,
-  onLanguage,
-  onToggleWrap,
-  onOpenDefault,
-  onReveal,
-}: {
-  info: WorkingFileInfo;
-  busy: boolean;
-  language: LanguageId;
-  wordWrap: boolean;
-  readOnly?: boolean;
-  onChange?: (encoding: string, lineEnding: string) => void;
-  onLanguage?: (language: LanguageId) => void;
-  onToggleWrap: () => void;
-  onOpenDefault: () => void;
-  onReveal: () => void;
-}) {
-  const [open, setOpen] = useState<
-    "encoding" | "lineEnding" | "language" | ""
-  >("");
-  useEffect(() => {
-    if (!open) return;
-    const close = (event: PointerEvent) => {
-      if (!(event.target as Element).closest(".filebar-format")) setOpen("");
-    };
-    document.addEventListener("pointerdown", close);
-    return () => document.removeEventListener("pointerdown", close);
-  }, [open]);
-  if (info.isDir) return null;
-  const textEditable =
-    info.previewKind === "text" && !info.binary && !info.tooLarge;
-  const textFile = info.previewKind === "text";
-  const lineEnding =
-    info.lineEnding === "LF" ||
-    info.lineEnding === "CRLF" ||
-    info.lineEnding === "CR"
-      ? info.lineEnding
-      : "LF";
-  if (readOnly) {
-    return (
-      <div className="desktop-filebar">
-        <span className="filebar-path" title={info.path}>
-          {info.path}
-        </span>
-        <span className="filebar-size">{formatBytes(info.size)}</span>
-        <span className="filebar-readonly">
-          {info.binary ? info.mimeType || "二进制" : info.encoding}
-        </span>
-        {!info.binary && (
-          <span className="filebar-readonly">
-            {info.lineEnding === "None" ? "无换行" : info.lineEnding}
-          </span>
-        )}
-        {textFile && (
-          <span className="filebar-readonly">{languageLabel(language)}</span>
-        )}
-        {textFile && (
-          <button
-            type="button"
-            className="filebar-action"
-            title="切换自动换行"
-            onClick={onToggleWrap}
-          >
-            <WrapText size={12} />
-            {wordWrap ? "不换行" : "换行"}
-          </button>
-        )}
-        <span className="filebar-readonly">历史版本 · 只读</span>
-      </div>
-    );
-  }
-  return (
-    <div className="desktop-filebar">
-      <span className="filebar-path" title={info.path}>
-        {info.path}
-      </span>
-      <span className="filebar-size">{formatBytes(info.size)}</span>
-      {textFile && (
-        <div className="filebar-format">
-          <button
-            type="button"
-            title="切换代码识别格式（仅影响预览）"
-            onClick={() => setOpen(open === "language" ? "" : "language")}
-          >
-            {languageLabel(language)}
-          </button>
-          {open === "language" && (
-            <div className="filebar-menu filebar-language-menu">
-              {LANGUAGES.map((item) => (
-                <button
-                  type="button"
-                  key={item.id}
-                  className={item.id === language ? "active" : ""}
-                  onClick={() => {
-                    setOpen("");
-                    onLanguage?.(item.id);
-                  }}
-                >
-                  {item.label}
-                  {item.id === language && <Check size={12} />}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-      <div className="filebar-format">
-        <button
-          type="button"
-          disabled={!textEditable || busy}
-          title={textEditable ? "切换编码" : "该文件不能切换文本编码"}
-          onClick={() => setOpen(open === "encoding" ? "" : "encoding")}
-        >
-          {info.encoding}
-        </button>
-        {open === "encoding" && (
-          <div className="filebar-menu">
-            {["UTF-8", "UTF-8 BOM", "UTF-16 LE", "UTF-16 BE"].map((value) => (
-              <button
-                type="button"
-                key={value}
-                className={value === info.encoding ? "active" : ""}
-                onClick={() => {
-                  setOpen("");
-                  onChange?.(value, lineEnding);
-                }}
-              >
-                {value}
-                {value === info.encoding && <Check size={12} />}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-      <div className="filebar-format">
-        <button
-          type="button"
-          disabled={!textEditable || busy || info.lineEnding === "None"}
-          title={textEditable ? "切换换行符" : "该文件不能切换换行符"}
-          onClick={() => setOpen(open === "lineEnding" ? "" : "lineEnding")}
-        >
-          {info.lineEnding === "None" ? "无换行" : info.lineEnding}
-        </button>
-        {open === "lineEnding" && (
-          <div className="filebar-menu">
-            {[
-              ["LF", "LF（Unix）"],
-              ["CRLF", "CRLF（Windows）"],
-              ["CR", "CR（旧版 Mac）"],
-            ].map(([value, label]) => (
-              <button
-                type="button"
-                key={value}
-                className={value === info.lineEnding ? "active" : ""}
-                onClick={() => {
-                  setOpen("");
-                  onChange?.(
-                    ["UTF-8", "UTF-8 BOM", "UTF-16 LE", "UTF-16 BE"].includes(
-                      info.encoding,
-                    )
-                      ? info.encoding
-                      : "UTF-8",
-                    value,
-                  );
-                }}
-              >
-                {label}
-                {value === info.lineEnding && <Check size={12} />}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-      {textFile && (
-        <button
-          type="button"
-          className="filebar-action"
-          title="切换自动换行"
-          onClick={onToggleWrap}
-        >
-          <WrapText size={12} />
-          {wordWrap ? "不换行" : "换行"}
-        </button>
-      )}
-      {!textEditable && (
-        <>
-          <button type="button" className="filebar-action" onClick={onOpenDefault}>
-            <ExternalLink size={12} />
-            默认应用打开
-          </button>
-          <button type="button" className="filebar-action" onClick={onReveal}>
-            <FolderOpen size={12} />
-            所在位置
-          </button>
-        </>
-      )}
-    </div>
-  );
-}
-
-function FilePreviewPane({
-  path,
-  info,
-  preview,
-  text,
-  language,
-  wordWrap,
-  loading,
-  error,
-  onClose,
-  onEdit,
-  onOpenDefault,
-  onReveal,
-}: {
-  path: string;
-  info?: WorkingFileInfo;
-  preview?: WorkingFilePreview;
-  text?: string;
-  language: LanguageId;
-  wordWrap: boolean;
-  loading: boolean;
-  error: string;
-  onClose: () => void;
-  onEdit: () => void;
-  onOpenDefault: () => void;
-  onReveal: () => void;
-}) {
-  const kind = info?.previewKind;
-  const needsPreview =
-    !!info &&
-    ["image", "audio", "video"].includes(info.previewKind) &&
-    !info.tooLarge;
-  const source = preview
-    ? `data:${preview.mimeType};base64,${preview.data}`
-    : "";
-  return (
-    <div className="desktop-preview-pane">
-      <div className="desktop-diff-header">
-        <button className="desktop-back" aria-label="返回文件列表" onClick={onClose}>
-          <ArrowLeft size={16} />
-        </button>
-        {kind === "image" ? (
-          <ImageIcon size={16} />
-        ) : kind === "audio" ? (
-          <Music size={16} />
-        ) : kind === "video" ? (
-          <Video size={16} />
-        ) : (
-          <FileQuestion size={16} />
-        )}
-        <strong>{path}</strong>
-        {info && (
-          <>
-            <span>{info.encoding}</span>
-            <span>{info.lineEnding === "None" ? "无换行" : info.lineEnding}</span>
-            <span>{formatBytes(info.size)}</span>
-            {info.previewKind === "text" && (
-              <span>{languageLabel(language)}</span>
-            )}
-          </>
-        )}
-        <span className="editor-actions">
-          {info?.editable && (
-            <button onClick={onEdit}>
-              <Pencil size={14} />
-              编辑
-            </button>
-          )}
-          <button onClick={onOpenDefault}>
-            <ExternalLink size={14} />
-            默认应用
-          </button>
-          <button onClick={onReveal}>
-            <FolderOpen size={14} />
-            所在位置
-          </button>
-        </span>
-      </div>
-      {loading || (needsPreview && !preview && !error) ? (
-        <Loading />
-      ) : error ? (
-        <div className="desktop-preview-empty">
-          <FileQuestion size={42} strokeWidth={1.3} />
-          <h2>无法预览此文件</h2>
-          <p>{error}</p>
-          <div className="form-actions">
-            <button onClick={onOpenDefault}>用默认应用打开</button>
-            <button onClick={onReveal}>打开文件所在位置</button>
-          </div>
-        </div>
-      ) : !info ? (
-        <Loading />
-      ) : info.previewKind === "unsupported" || info.tooLarge ? (
-        <div className="desktop-preview-empty">
-          <FileQuestion size={42} strokeWidth={1.3} />
-          <h2>{info.tooLarge ? "文件过大" : "不支持内置预览"}</h2>
-          <p>
-            {info.tooLarge
-              ? "文件超过 32 MiB，请使用默认应用打开。"
-              : `${info.mimeType || "二进制文件"}，可以使用默认应用查看。`}
-          </p>
-          <div className="form-actions">
-            <button onClick={onOpenDefault}>用默认应用打开</button>
-            <button onClick={onReveal}>打开文件所在位置</button>
-          </div>
-        </div>
-      ) : info.previewKind === "image" && source ? (
-        <div className="desktop-preview-media">
-          <img src={source} alt={path} />
-        </div>
-      ) : info.previewKind === "audio" && source ? (
-        <div className="desktop-preview-media">
-          <Music size={52} strokeWidth={1.2} />
-          <audio controls src={source} />
-        </div>
-      ) : info.previewKind === "video" && source ? (
-        <div className="desktop-preview-media">
-          <video controls src={source} />
-        </div>
-      ) : info.previewKind === "text" ? (
-        <CodePreview code={text || ""} language={language} wordWrap={wordWrap} />
-      ) : (
-        <div className="desktop-preview-empty">
-          <FileText size={42} strokeWidth={1.3} />
-          <h2>文本文件</h2>
-          <p>使用内置编辑器查看和修改此文件。</p>
-          <div className="form-actions">
-            {info.editable && <button onClick={onEdit}>编辑文件</button>}
-            <button onClick={onOpenDefault}>用默认应用打开</button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function CodePreview({
-  code,
-  language,
-  wordWrap,
-}: {
-  code: string;
-  language: LanguageId;
-  wordWrap: boolean;
-}) {
-  const lines = code.split("\n");
-  return (
-    <div
-      className={`desktop-code-preview${wordWrap ? " wrap" : ""}`}
-      role="region"
-      aria-label="文件内容预览"
-    >
-      <div className="code-lines">
-        {lines.map((line, index) => (
-          <div className="code-line" key={index}>
-            <span className="code-line-number">{index + 1}</span>
-            <span
-              className="code-line-text"
-              dangerouslySetInnerHTML={{
-                __html: highlightCode(line, language),
-              }}
-            />
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function decodeBase64(value: string) {
-  const binary = atob(value || "");
-  const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index++)
-    bytes[index] = binary.charCodeAt(index);
-  return bytes;
-}
-
-function CommitMediaPreview({
-  info,
-  preview,
-  loading,
-  error,
-}: {
-  info: WorkingFileInfo;
-  preview?: WorkingFilePreview;
-  loading: boolean;
-  error: string;
-}) {
-  const source = preview
-    ? `data:${preview.mimeType};base64,${preview.data}`
-    : "";
-  return (
-    <div className="desktop-preview-pane">
-      <div className="desktop-diff-header">
-        {info.previewKind === "image" ? (
-          <ImageIcon size={16} />
-        ) : info.previewKind === "audio" ? (
-          <Music size={16} />
-        ) : (
-          <Video size={16} />
-        )}
-        <strong>{info.path}</strong>
-        <span>{info.mimeType}</span>
-        <span>{formatBytes(info.size)}</span>
-      </div>
-      {loading ? (
-        <Loading />
-      ) : info.tooLarge ? (
-        <div className="desktop-preview-empty">
-          <FileQuestion size={42} strokeWidth={1.3} />
-          <h2>文件过大</h2>
-          <p>该媒体文件过大，无法在提交历史中内置预览。</p>
-        </div>
-      ) : error ? (
-        <div className="desktop-preview-empty">
-          <FileQuestion size={42} strokeWidth={1.3} />
-          <h2>无法预览此媒体文件</h2>
-          <p>{error}</p>
-        </div>
-      ) : info.previewKind === "image" && source ? (
-        <div className="desktop-preview-media">
-          <img src={source} alt={info.path} />
-        </div>
-      ) : info.previewKind === "audio" && source ? (
-        <div className="desktop-preview-media">
-          <Music size={52} strokeWidth={1.2} />
-          <audio controls src={source} />
-        </div>
-      ) : info.previewKind === "video" && source ? (
-        <div className="desktop-preview-media">
-          <video controls src={source} />
-        </div>
-      ) : (
-        <Loading />
-      )}
-    </div>
-  );
-}
-
-function BinaryDiffPane({
-  info,
-  diff,
-  loading,
-  error,
-}: {
-  info: WorkingFileInfo;
-  diff?: CommitBinaryDiff;
-  loading: boolean;
-  error: string;
-}) {
-  const oldBytes = decodeBase64(diff?.oldData || "");
-  const newBytes = decodeBase64(diff?.newData || "");
-  const displayBytes = newBytes.length ? newBytes : oldBytes;
-  const rows: ReactNode[] = [];
-  const limit = Math.min(displayBytes.length, 16 << 10);
-  for (let offset = 0; offset < limit; offset += 16) {
-    const row = displayBytes.slice(offset, Math.min(limit, offset + 16));
-    const hex: ReactNode[] = [];
-    const ascii: ReactNode[] = [];
-    row.forEach((byte, index) => {
-      const position = offset + index;
-      const changed =
-        !diff?.oldExists ||
-        !diff?.newExists ||
-        position >= oldBytes.length ||
-        oldBytes[position] !== byte;
-      const text = byte >= 32 && byte <= 126 ? String.fromCharCode(byte) : ".";
-      hex.push(
-        <span
-          key={`h:${position}`}
-          className={changed ? "binary-byte changed" : "binary-byte"}
-        >
-          {byte.toString(16).padStart(2, "0")}
-        </span>,
-      );
-      ascii.push(
-        <span
-          key={`a:${position}`}
-          className={changed ? "binary-byte changed" : "binary-byte"}
-        >
-          {text}
-        </span>,
-      );
-    });
-    rows.push(
-      <div className="binary-hex-row" key={offset}>
-        <span className="binary-offset">
-          {offset.toString(16).padStart(8, "0")}
-        </span>
-        <span className="binary-hex">{hex}</span>
-        <span className="binary-ascii">{ascii}</span>
-      </div>,
-    );
-  }
-  return (
-    <div className="binary-diff-pane">
-      <div className="binary-diff-summary">
-        <FileQuestion size={16} />
-        <strong>{info.path}</strong>
-        <span>{info.mimeType || "application/octet-stream"}</span>
-        <span>
-          {diff
-            ? `${diff.oldExists ? formatBytes(diff.oldSize) : "不存在"} → ${
-                diff.newExists ? formatBytes(diff.newSize) : "已删除"
-              }`
-            : formatBytes(info.size)}
-        </span>
-        {diff && (
-          <span className={diff.changedBytes ? "stat-del" : ""}>
-            {diff.changedBytes
-              ? `${diff.changedBytes} 个字节不同`
-              : diff.oldHash && diff.oldHash === diff.newHash
-                ? "文件内容相同"
-                : "前 64 KiB 无差异"}
-          </span>
-        )}
-      </div>
-      {loading ? (
-        <Loading />
-      ) : error ? (
-        <ErrorNotice message={error} />
-      ) : diff ? (
-        <>
-          <div className="binary-meta">
-            <span>
-              旧:{diff.oldExists ? diff.oldHash.slice(0, 12) : "不存在"}
-            </span>
-            <span>
-              新:{diff.newExists ? diff.newHash.slice(0, 12) : "已删除"}
-            </span>
-            {diff.truncated && <span>差异统计基于前 64 KiB</span>}
-            <span>十六进制预览前 16 KiB</span>
-            {diff.firstDifference >= 0 && (
-              <span>首个差异位于 0x{diff.firstDifference.toString(16)}</span>
-            )}
-          </div>
-          <div className="binary-hex-view">
-            {rows.length ? rows : <p className="desktop-list-empty">文件为空</p>}
-          </div>
-        </>
-      ) : (
-        <Loading />
-      )}
-    </div>
-  );
 }
 
 function ContextSubmenu({
@@ -4110,236 +3481,6 @@ function ContextSubmenu({
   );
 }
 
-type BranchTreeNode = {
-  name: string;
-  path: string;
-  branch?: Branch;
-  children: BranchTreeNode[];
-};
-
-function buildBranchTree(branches: Branch[]): BranchTreeNode[] {
-  type MutableNode = {
-    name: string;
-    path: string;
-    branch?: Branch;
-    children: Map<string, MutableNode>;
-  };
-  const root = new Map<string, MutableNode>();
-  for (const branch of branches) {
-    const parts = branch.name.split("/");
-    let children = root;
-    let prefix = "";
-    parts.forEach((part, index) => {
-      prefix = prefix ? `${prefix}/${part}` : part;
-      const leaf = index === parts.length - 1;
-      let node = children.get(part);
-      if (!node) {
-        node = {
-          name: part,
-          path: prefix,
-          branch: leaf ? branch : undefined,
-          children: new Map(),
-        };
-        children.set(part, node);
-      }
-      if (leaf) node.branch = branch;
-      else children = node.children;
-    });
-  }
-  const finish = (children: Map<string, MutableNode>): BranchTreeNode[] =>
-    [...children.values()]
-      .sort((a, b) =>
-        !a.branch && b.branch
-          ? -1
-          : a.branch && !b.branch
-            ? 1
-            : a.name.localeCompare(b.name),
-      )
-      .map((node) => ({
-        name: node.name,
-        path: node.path,
-        branch: node.branch,
-        children: finish(node.children),
-      }));
-  return finish(root);
-}
-
-function BranchTreeView({
-  branches,
-  prefix,
-  search,
-  collapsed,
-  setCollapsed,
-  onSwitch,
-  busy,
-}: {
-  branches: Branch[];
-  prefix: string;
-  search: string;
-  collapsed: Set<string>;
-  setCollapsed: (value: (old: Set<string>) => Set<string>) => void;
-  onSwitch: (name: string) => void;
-  busy: boolean;
-}) {
-  const filtered = useMemo(
-    () =>
-      branches.filter((branch) =>
-        branch.name.toLowerCase().includes(search.toLowerCase()),
-      ),
-    [branches, search],
-  );
-  const tree = useMemo(() => buildBranchTree(filtered), [filtered]);
-  const render = (nodes: BranchTreeNode[], depth: number): ReactNode[] =>
-    nodes.flatMap((node) => {
-      const key = `${prefix}:${node.path}`;
-      if (node.branch) {
-        const branch = node.branch;
-        return [
-          <button
-            type="button"
-            key={`leaf:${key}`}
-            className={`branch-leaf${branch.current ? " current" : ""}`}
-            style={{ paddingLeft: 12 + depth * 15 }}
-            title={branch.name}
-            disabled={busy || branch.current}
-            onClick={() => onSwitch(branch.name)}
-          >
-            <GitBranch size={13} />
-            <span>{node.name}</span>
-            {branch.current && <Check size={13} />}
-          </button>,
-        ];
-      }
-      const expanded = !!search || !collapsed.has(key);
-      return [
-        <button
-          type="button"
-          key={`folder:${key}`}
-          className="branch-folder"
-          style={{ paddingLeft: 10 + depth * 15 }}
-          aria-expanded={expanded}
-          onClick={() =>
-            setCollapsed((old) => {
-              const next = new Set(old);
-              if (next.has(key)) next.delete(key);
-              else next.add(key);
-              return next;
-            })
-          }
-        >
-          {expanded ? (
-            <ChevronDown size={13} />
-          ) : (
-            <ChevronRight size={13} />
-          )}
-          {expanded ? <FolderOpen size={13} /> : <Folder size={13} />}
-          <span>{node.name}</span>
-        </button>,
-        ...(expanded ? render(node.children, depth + 1) : []),
-      ];
-    });
-  return <div className="branch-tree">{render(tree, 0)}</div>;
-}
-
-function buildFileTree(
-  files: FileStatus[],
-  rootNode?: { name: string; path: string },
-): FileTreeNode[] {
-  type MutableNode = {
-    name: string;
-    path: string;
-    isDir: boolean;
-    file?: FileStatus;
-    children: Map<string, MutableNode>;
-  };
-  const root = new Map<string, MutableNode>();
-  for (const file of files) {
-    const parts = file.path.split("/");
-    let children = root;
-    let prefix = "";
-    parts.forEach((part, index) => {
-      prefix = prefix ? `${prefix}/${part}` : part;
-      const leaf = index === parts.length - 1;
-      let node = children.get(part);
-      if (!node) {
-        node = {
-          name: part,
-          path: prefix,
-          isDir: !leaf,
-          file: leaf ? file : undefined,
-          children: new Map(),
-        };
-        children.set(part, node);
-      }
-      if (leaf) {
-        node.isDir = false;
-        node.file = file;
-      } else {
-        node.isDir = true;
-        children = node.children;
-      }
-    });
-  }
-  const finish = (children: Map<string, MutableNode>): FileTreeNode[] =>
-    [...children.values()]
-      .sort((a, b) =>
-        a.isDir === b.isDir
-          ? a.name.localeCompare(b.name)
-          : a.isDir
-            ? -1
-            : 1,
-      )
-      .map((node) => ({
-        name: node.name,
-        path: node.path,
-        isDir: node.isDir,
-        file: node.file,
-        children: finish(node.children),
-      }));
-  const children = finish(root);
-  if (rootNode) {
-    return [
-      {
-        name: rootNode.name,
-        path: rootNode.path,
-        isDir: true,
-        children,
-      },
-    ];
-  }
-  return children;
-}
-
-function fileStats(file: FileStatus) {
-  return {
-    additions:
-      (file.indexAdditions || 0) + (file.worktreeAdditions || 0),
-    deletions:
-      (file.indexDeletions || 0) + (file.worktreeDeletions || 0),
-  };
-}
-
-function flattenTree(node: FileTreeNode): FileStatus[] {
-  if (node.file) return [node.file];
-  return node.children.flatMap(flattenTree);
-}
-
-function treeStats(node: FileTreeNode) {
-  return flattenTree(node).reduce(
-    (total, file) => {
-      const stats = fileStats(file);
-      return {
-        additions: total.additions + stats.additions,
-        deletions: total.deletions + stats.deletions,
-      };
-    },
-    { additions: 0, deletions: 0 },
-  );
-}
-
-function hasStaged(f: FileStatus) {
-  return f.index !== " " && f.index !== "?";
-}
 function RelativeTime({ date }: { date: string }) {
   const value = new Date(date);
   if (Number.isNaN(value.getTime())) return <>{date}</>;
@@ -4350,291 +3491,5 @@ function RelativeTime({ date }: { date: string }) {
   if (seconds < 7 * 86400) return <>{Math.floor(seconds / 86400)} 天前</>;
   return <>{value.toLocaleDateString("zh-CN")}</>;
 }
-function hasUnstaged(f: FileStatus) {
-  return f.worktree !== " " || f.index === "?";
-}
-function diffStats(text: string) {
-  let files = 0,
-    insertions = 0,
-    deletions = 0;
-  for (const line of text.split("\n")) {
-    if (line.startsWith("diff --git ")) files++;
-    else if (line.startsWith("+++ ") || line.startsWith("--- ")) continue;
-    else if (line.startsWith("+")) insertions++;
-    else if (line.startsWith("-")) deletions++;
-  }
-  return { files, insertions, deletions };
-}
-
-function diffChangeKind(diff: string) {
-  if (/^new file mode /m.test(diff) || /^--- \/dev\/null$/m.test(diff))
-    return "added";
-  if (/^deleted file mode /m.test(diff) || /^\+\+\+ \/dev\/null$/m.test(diff))
-    return "deleted";
-  if (/^rename (?:from|to) /m.test(diff)) return "renamed";
-  return "modified";
-}
-
-type SplitDiffRow = {
-  type: "meta" | "hunk" | "context" | "change";
-  oldNo?: number;
-  newNo?: number;
-  oldText?: string;
-  newText?: string;
-};
-
-function splitDiffRows(text: string): SplitDiffRow[] {
-  const lines = text.split("\n");
-  const rows: SplitDiffRow[] = [];
-  let oldNo = 0;
-  let newNo = 0;
-  let index = 0;
-  while (index < lines.length) {
-    const line = lines[index];
-    const hunk = /^@@ -(\d+)(?:,\d+)? \+(\d+)/.exec(line);
-    if (hunk) {
-      oldNo = Number(hunk[1]);
-      newNo = Number(hunk[2]);
-      rows.push({ type: "hunk", oldText: line, newText: line });
-      index++;
-      continue;
-    }
-    if (line.startsWith("-") && !line.startsWith("---")) {
-      const oldStart = oldNo;
-      const oldLines: string[] = [];
-      while (
-        index < lines.length &&
-        lines[index].startsWith("-") &&
-        !lines[index].startsWith("---")
-      ) {
-        oldLines.push(lines[index].slice(1));
-        oldNo++;
-        index++;
-      }
-      const newStart = newNo;
-      const newLines: string[] = [];
-      while (
-        index < lines.length &&
-        lines[index].startsWith("+") &&
-        !lines[index].startsWith("+++")
-      ) {
-        newLines.push(lines[index].slice(1));
-        newNo++;
-        index++;
-      }
-      const count = Math.max(oldLines.length, newLines.length);
-      for (let offset = 0; offset < count; offset++) {
-        rows.push({
-          type: "change",
-          oldNo: oldLines[offset] === undefined ? undefined : oldStart + offset,
-          newNo: newLines[offset] === undefined ? undefined : newStart + offset,
-          oldText: oldLines[offset],
-          newText: newLines[offset],
-        });
-      }
-      continue;
-    }
-    if (line.startsWith("+") && !line.startsWith("+++")) {
-      const start = newNo;
-      const added: string[] = [];
-      while (
-        index < lines.length &&
-        lines[index].startsWith("+") &&
-        !lines[index].startsWith("+++")
-      ) {
-        added.push(lines[index].slice(1));
-        newNo++;
-        index++;
-      }
-      added.forEach((value, offset) =>
-        rows.push({
-          type: "change",
-          newNo: start + offset,
-          newText: value,
-        }),
-      );
-      continue;
-    }
-    if (line.startsWith(" ")) {
-      rows.push({
-        type: "context",
-        oldNo: oldNo++,
-        newNo: newNo++,
-        oldText: line.slice(1),
-        newText: line.slice(1),
-      });
-      index++;
-      continue;
-    }
-    rows.push({ type: "meta", oldText: line, newText: line });
-    index++;
-  }
-  return rows;
-}
-
-function SplitDiffView({
-  text,
-  language,
-  wordWrap,
-}: {
-  text: string;
-  language: LanguageId;
-  wordWrap: boolean;
-}) {
-  const rows = useMemo(() => splitDiffRows(text), [text]);
-  return (
-    <div className={`split-diff${wordWrap ? " wrap" : ""}`}>
-      <div className="split-diff-body">
-        {rows.map((row, index) =>
-          row.type === "meta" || row.type === "hunk" ? (
-            <div className={`split-diff-full ${row.type}`} key={index}>
-              <code
-                dangerouslySetInnerHTML={{
-                  __html: highlightCode(row.oldText || "", "plaintext"),
-                }}
-              />
-            </div>
-          ) : (
-            <div className="split-diff-row" key={index}>
-              <div
-                className={`split-diff-cell ${row.oldText === undefined ? "empty" : ""} ${row.oldText !== undefined && row.oldText !== row.newText ? "removed" : ""}`}
-              >
-                <span className="split-diff-number">{row.oldNo ?? ""}</span>
-                <code
-                  dangerouslySetInnerHTML={{
-                    __html: highlightCode(row.oldText || "", language),
-                  }}
-                />
-              </div>
-              <div
-                className={`split-diff-cell ${row.newText === undefined ? "empty" : ""} ${row.newText !== undefined && row.oldText !== row.newText ? "added" : ""}`}
-              >
-                <span className="split-diff-number">{row.newNo ?? ""}</span>
-                <code
-                  dangerouslySetInnerHTML={{
-                    __html: highlightCode(row.newText || "", language),
-                  }}
-                />
-              </div>
-            </div>
-          ),
-        )}
-      </div>
-    </div>
-  );
-}
-
-export function DiffViewer({
-  text,
-  showFileHeaders = true,
-  stats,
-  fileCount,
-  ignored = 0,
-  wordWrap = false,
-}: {
-  text: string;
-  showFileHeaders?: boolean;
-  stats?: { additions: number; deletions: number };
-  fileCount?: number;
-  ignored?: number;
-  wordWrap?: boolean;
-}) {
-  const [limit, setLimit] = useState(1500);
-  const filteredStats = useMemo(() => diffStats(text), [text]);
-  const shownStats = stats ?? {
-    additions: filteredStats.insertions,
-    deletions: filteredStats.deletions,
-  };
-  const lines = useMemo(() => {
-    let old = 0,
-      next = 0;
-    let insideHunk = false;
-    return text.split("\n").flatMap((line, index) => {
-      const hunk = /^@@ -(\d+)(?:,\d+)? \+(\d+)/.exec(line);
-      if (hunk) {
-        insideHunk = true;
-        old = Number(hunk[1]);
-        next = Number(hunk[2]);
-        return [{ line, index, type: "hunk", old: "", next: "" }];
-      }
-      if (line.startsWith("diff --git ")) {
-        insideHunk = false;
-        return showFileHeaders
-          ? [{ line: line.slice(11), index, type: "file", old: "", next: "" }]
-          : [];
-      }
-      if (
-        line.startsWith("index ") ||
-        line.startsWith("--- ") ||
-        line.startsWith("+++ ")
-      )
-        return [];
-      if (line.startsWith("new file") || line.startsWith("deleted file"))
-        return [{ line, index, type: "meta", old: "", next: "" }];
-      if (line.startsWith("+"))
-        return [{ line, index, type: "add", old: "", next: String(next++) }];
-      if (line.startsWith("-"))
-        return [{ line, index, type: "delete", old: String(old++), next: "" }];
-      if (line.startsWith(" ") && insideHunk)
-        return [
-          {
-            line,
-            index,
-            type: "context",
-            old: String(old++),
-            next: String(next++),
-          },
-        ];
-      return line ? [{ line, index, type: "meta", old: "", next: "" }] : [];
-    });
-  }, [text, showFileHeaders]);
-  return (
-    <div className={`desktop-diff${wordWrap ? " wrap" : ""}`} role="region" aria-label="文件差异">
-      <div className="diff-summary" aria-label="差异统计">
-        <span>{fileCount ?? filteredStats.files} 个文件</span>
-        <span className="stat-add">+{shownStats.additions}</span>
-        <span className="stat-del">−{shownStats.deletions}</span>
-        {ignored > 0 && (
-          <span className="diff-ignored">已忽略 {ignored} 行换行符差异</span>
-        )}
-      </div>
-      <div className="diff-table">
-        {lines.slice(0, limit).map((row) => (
-          <div className={`diff-line ${row.type}`} key={row.index}>
-            <span className="line-number">{row.old}</span>
-            <span className="line-number">{row.next}</span>
-            <code>{row.line || " "}</code>
-          </div>
-        ))}
-      </div>
-      {lines.length > limit && (
-        <div className="diff-more">
-          已显示 {limit} / {lines.length} 行。
-          <button onClick={() => setLimit((n) => n + 1500)}>继续显示</button>
-        </div>
-      )}
-    </div>
-  );
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
