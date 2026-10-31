@@ -54,6 +54,7 @@ func installMacMenu(app *application.App, emit func(string, any)) {
 	view.Add("变更").SetAccelerator("CmdOrCtrl+1").OnClick(action("view.changes"))
 	view.Add("历史").SetAccelerator("CmdOrCtrl+2").OnClick(action("view.history"))
 	view.Add("刷新仓库状态").SetAccelerator("CmdOrCtrl+R").OnClick(action("view.refresh"))
+	view.Add("自动换行").OnClick(action("view.wrap"))
 	view.Add("任务中心").SetAccelerator("CmdOrCtrl+Shift+T").OnClick(action("view.tasks"))
 	view.AddSeparator()
 	theme := view.AddSubmenu("主题")

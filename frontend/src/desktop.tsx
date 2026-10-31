@@ -19,6 +19,7 @@ import {
   X,
   Settings2,
   GitCommitHorizontal,
+  Columns2,
   Clock3,
   Star,
   Activity,
@@ -42,6 +43,7 @@ import {
   Video,
   FileQuestion,
   Eye,
+  WrapText,
   Save,
 } from "lucide-react";
 import { version } from "../package.json";
@@ -121,6 +123,7 @@ type MenuNode = {
   action?: () => void;
   disabled?: boolean;
   hidden?: boolean;
+  checked?: boolean;
   nativeAction?: string;
   children?: {
     label: string;
@@ -151,6 +154,9 @@ export default function Desktop() {
     const saved = localStorage.getItem("repo-berth-theme");
     return saved === "light" || saved === "dark" ? saved : "system";
   });
+  const [wordWrap, setWordWrap] = useState(
+    () => localStorage.getItem("repo-berth-wrap") === "true",
+  );
   const [tab, setTab] = useState<"changes" | "history">("changes");
   const [showCompletedTasks, setShowCompletedTasks] = useState(false);
   const [error, setError] = useState(""),
@@ -339,6 +345,9 @@ export default function Desktop() {
       );
     return () => media?.removeEventListener("change", apply);
   }, [theme, nativeMenubar]);
+  useEffect(() => {
+    localStorage.setItem("repo-berth-wrap", String(wordWrap));
+  }, [wordWrap]);
   useEffect(() => {
     let off = () => {};
     let live = true;
@@ -551,6 +560,15 @@ export default function Desktop() {
         action: () => {
           if (!checkout) return;
           void status.refetch();
+          setPopup("");
+        },
+      },
+      {
+        label: "自动换行",
+        nativeAction: "view.wrap",
+        checked: wordWrap,
+        action: () => {
+          setWordWrap((value) => !value);
           setPopup("");
         },
       },
@@ -839,6 +857,7 @@ export default function Desktop() {
                     ) : (
                       <button
                         key={item.label}
+                        className={item.checked ? "checked" : ""}
                         disabled={item.disabled}
                         onClick={() => {
                           setPopup("");
@@ -846,6 +865,7 @@ export default function Desktop() {
                         }}
                       >
                         {item.label}
+                        {item.checked && <Check size={14} />}
                       </button>
                     ),
                   )}
@@ -1022,10 +1042,7 @@ export default function Desktop() {
                 <Plus size={15} />
                 添加 / 管理账号
               </button>
-              <p>
-                用于当前 Git
-                网络操作，选择后记作默认账号。仓库已有绑定时优先使用绑定；不切换仓库、不更改提交信息。
-              </p>
+              
             </div>
           )}
         </div>
@@ -1206,6 +1223,8 @@ export default function Desktop() {
           busy={busy}
           tab={tab}
           setTab={setTab}
+          wordWrap={wordWrap}
+          setWordWrap={setWordWrap}
           execute={execute}
           configure={() => show("repository")}
           accountSettings={() => show("accounts")}
@@ -1538,6 +1557,8 @@ function Worktree({
   busy,
   tab,
   setTab,
+  wordWrap,
+  setWordWrap,
   execute,
   configure,
   accountSettings,
@@ -1554,6 +1575,8 @@ function Worktree({
   busy: boolean;
   tab: "changes" | "history";
   setTab: (tab: "changes" | "history") => void;
+  wordWrap: boolean;
+  setWordWrap: (value: (current: boolean) => boolean) => void;
   execute: Execute;
   configure: () => void;
   accountSettings: () => void;
@@ -1565,6 +1588,7 @@ function Worktree({
     [selected, setSelected] = useState<{ path: string; staged: boolean }>(),
     [commitHash, setCommitHash] = useState(""),
     [historyFile, setHistoryFile] = useState(""),
+    [diffMode, setDiffMode] = useState<"unified" | "split">("unified"),
     [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set()),
     [sending, setSending] = useState(false),
     [stageOverrides, setStageOverrides] = useState<Record<string, boolean>>({}),
@@ -1585,6 +1609,7 @@ function Worktree({
     [cursorLine, setCursorLine] = useState(1),
     [newFileOpen, setNewFileOpen] = useState(false),
     [newFileName, setNewFileName] = useState(""),
+    [newFileInitial, setNewFileInitial] = useState(""),
     [newFileError, setNewFileError] = useState(""),
     [newItemKind, setNewItemKind] = useState<"file" | "dir">("file"),
     [treeSelected, setTreeSelected] = useState(""),
@@ -1789,23 +1814,34 @@ function Worktree({
   const startCreate = (base: string, kind: "file" | "dir") => {
     setMenu(undefined);
     setNewItemKind(kind);
-    setNewFileName(base ? base.replace(/\/+$/, "") + "/" : "");
+    const initial = base ? base.replace(/\/+$/, "") + "/" : "";
+    setNewFileName(initial);
+    setNewFileInitial(initial);
     setNewFileError("");
     setNewFileOpen(true);
   };
   const createFile = async () => {
-    const name = newFileName.trim().replace(/^\/+/, "");
-    if (!name) return;
+    const raw = newFileName.trim().replace(/^[\\/]+/, "");
+    if (!raw) return;
+    if (newItemKind === "file" && newFileInitial && raw === newFileInitial) {
+      setNewFileError("请输入文件名，或在末尾添加 / 创建目录。");
+      return;
+    }
+    const directory =
+      newItemKind === "dir" ||
+      (/[\\/]$/.test(raw) && raw !== newFileInitial);
+    const name = raw.replace(/[\\/]+$/, "").replace(/\\/g, "/");
     setNewFileError("");
     try {
-      if (newItemKind === "dir")
+      if (directory)
         await api("CreateWorkingDirectory", c.id, name);
       else await api("CreateWorkingFile", c.id, name);
       setNewFileOpen(false);
       setNewFileName("");
+      setNewFileInitial("");
       await refreshWorkingTree();
       setTreeSelected(name);
-      if (newItemKind === "file") await openEditor(name);
+      if (!directory) await openEditor(name);
       else {
         setChangesCollapsed((old) => {
           const next = new Set(old);
@@ -1879,7 +1915,7 @@ function Worktree({
     setTreeSelected(node.path);
     setMenu({
       x: Math.min(event.clientX, Math.max(8, window.innerWidth - 220)),
-      y: Math.min(event.clientY, Math.max(8, window.innerHeight - 260)),
+      y: Math.min(event.clientY, Math.max(8, window.innerHeight - 540)),
       node,
     });
   };
@@ -2295,6 +2331,10 @@ function Worktree({
       api("OpenWorkingPath", c.id, path, kind),
     );
   };
+  const newEntryRaw = newFileName.trim().replace(/^[\\/]+/, "");
+  const newEntryIsDirectory =
+    newItemKind === "dir" ||
+    (/[\\/]$/.test(newEntryRaw) && newEntryRaw !== newFileInitial);
   const changeFormat = (encoding: string, lineEnding: string) => {
     if (!infoPath || formatBusy) return;
     if (editing && editorText !== editorOriginal) {
@@ -2328,10 +2368,12 @@ function Worktree({
             info={fileInfo.data}
             busy={formatBusy}
             language={infoLanguage}
+            wordWrap={wordWrap}
             onChange={changeFormat}
             onLanguage={(language) =>
               setLanguageOverrides((old) => ({ ...old, [infoPath]: language }))
             }
+            onToggleWrap={() => setWordWrap((value) => !value)}
             onOpenDefault={() => openWorking(fileInfo.data!.path, "default")}
             onReveal={() => openWorking(fileInfo.data!.path, "reveal")}
           />,
@@ -2346,7 +2388,9 @@ function Worktree({
             info={historyFileInfo.data}
             busy={false}
             language={detectLanguage(historyFile)}
+            wordWrap={wordWrap}
             readOnly
+            onToggleWrap={() => setWordWrap((value) => !value)}
             onOpenDefault={() => {}}
             onReveal={() => {}}
           />,
@@ -2449,7 +2493,7 @@ function Worktree({
                   ),
                   y: Math.min(
                     event.clientY,
-                    Math.max(8, window.innerHeight - 180),
+                    Math.max(8, window.innerHeight - 360),
                   ),
                   node: {
                     name: "",
@@ -2617,6 +2661,20 @@ function Worktree({
                 <GitCommitHorizontal size={16} />
                 <strong>{commit.subject}</strong>
                 <code>{commit.hash.slice(0, 7)}</code>
+                {(!historyFile ||
+                  historyFileInfo.data?.previewKind === "text") && (
+                  <button
+                    className="diff-edit-button"
+                    onClick={() =>
+                      setDiffMode((mode) =>
+                        mode === "split" ? "unified" : "split",
+                      )
+                    }
+                  >
+                    <Columns2 size={14} />
+                    {diffMode === "split" ? "统一差异" : "并排差异"}
+                  </button>
+                )}
               </div>
               <div className="desktop-commit-info">
                 {commit.author} &lt;{commit.email}&gt; ·{" "}
@@ -2680,12 +2738,19 @@ function Worktree({
                           : ""
                       }
                     />
+                  ) : diffMode === "split" ? (
+                    <SplitDiffView
+                      text={historyDisplayText}
+                      language={detectLanguage(historyFile)}
+                      wordWrap={wordWrap}
+                    />
                   ) : (
                     <DiffViewer
                       key={commit.hash + historyFile}
                       text={historyDisplayText}
                       stats={historyRawStats}
                       ignored={historyIgnored}
+                      wordWrap={wordWrap}
                     />
                   )}
                 </div>
@@ -2745,40 +2810,40 @@ function Worktree({
               <Loading />
             ) : (
               <div className="editor-body">
-                <pre ref={gutterRef} className="editor-gutter" aria-hidden="true">
-                  {Array.from(
-                    { length: editorLineCount },
-                    (_, index) => index + 1,
-                  ).join("\n")}
-                </pre>
                 <div className="editor-code">
                   <pre
                     ref={editorHighlightRef}
-                    className="editor-highlight"
+                    className={`editor-highlight${wordWrap ? " wrap" : ""}`}
                     aria-hidden="true"
                   >
-                    <code
-                      dangerouslySetInnerHTML={{
-                        __html: highlightCode(
-                          editorText + "\n",
-                          editorLanguage,
-                        ),
-                      }}
-                    />
+                    <code>
+                      {editorText.split("\n").map((line, index) => (
+                        <span className="editor-line" key={index}>
+                          <span className="editor-line-number">
+                            {index + 1}
+                          </span>
+                          <span
+                            className="editor-line-text"
+                            dangerouslySetInnerHTML={{
+                              __html: highlightCode(line, editorLanguage),
+                            }}
+                          />
+                        </span>
+                      ))}
+                    </code>
                   </pre>
                   <textarea
                     ref={editorRef}
                     aria-label={`编辑 ${editing}`}
                     value={editorText}
                     spellCheck={false}
-                    wrap="off"
+                    wrap={wordWrap ? "soft" : "off"}
+                    className={wordWrap ? "wrap" : ""}
                     onChange={(e) => {
                       setEditorText(e.target.value);
                       updateCursorLine();
                     }}
                     onScroll={(e) => {
-                      if (gutterRef.current)
-                        gutterRef.current.scrollTop = e.currentTarget.scrollTop;
                       if (editorHighlightRef.current) {
                         editorHighlightRef.current.scrollTop =
                           e.currentTarget.scrollTop;
@@ -2810,6 +2875,7 @@ function Worktree({
             preview={preview.data}
             text={previewText.data}
             language={infoLanguage}
+            wordWrap={wordWrap}
             loading={
               fileInfo.isPending ||
               preview.isFetching ||
@@ -2861,8 +2927,19 @@ function Worktree({
               )}
               <button
                 className="diff-edit-button"
+                onClick={() =>
+                  setDiffMode((mode) =>
+                    mode === "split" ? "unified" : "split",
+                  )
+                }
+              >
+                <Columns2 size={14} />
+                {diffMode === "split" ? "统一差异" : "并排差异"}
+              </button>
+              <button
+                className="diff-edit-button"
                 disabled={!editable(file)}
-                title={editable(file) ? "在应用内编辑文件" : "该文件不可编辑"}
+                title={editable(file) ? "在应用中编辑文件" : "该文件不可编辑"}
                 onClick={() => void openEditor(activeFile.path)}
               >
                 <Pencil size={14} />
@@ -2874,13 +2951,22 @@ function Worktree({
             ) : diff.isError ? (
               <ErrorNotice message={errorMessage(diff.error)} />
             ) : diff.data || activeIgnored > 0 ? (
-              <DiffViewer
-                key={activeFile.path + activeFile.staged}
-                text={diff.data || ""}
-                stats={activeRawStats}
-                ignored={activeIgnored}
-                showFileHeaders={false}
-              />
+              diffMode === "split" && diff.data ? (
+                <SplitDiffView
+                  text={diff.data}
+                  language={infoLanguage}
+                  wordWrap={wordWrap}
+                />
+              ) : (
+                <DiffViewer
+                  key={activeFile.path + activeFile.staged}
+                  text={diff.data || ""}
+                  stats={activeRawStats}
+                  ignored={activeIgnored}
+                  showFileHeaders={false}
+                  wordWrap={wordWrap}
+                />
+              )
             ) : (
               <div className="desktop-empty-detail">
                 <FileText size={32} />
@@ -3003,20 +3089,22 @@ function Worktree({
       )}
       {menu && (
         <div
-          className="desktop-context-menu"
+          className={`desktop-context-menu${menu.x > window.innerWidth - 460 ? " submenu-left" : ""}`}
           role="menu"
           style={{ left: menu.x, top: menu.y }}
         >
           {menu.node.isDir ? (
             <>
-              <button onClick={() => startCreate(menu.node.path, "file")}>
-                <FilePlus2 size={14} />
-                {menu.node.path ? "新建子文件…" : "新建文件…"}
-              </button>
-              <button onClick={() => startCreate(menu.node.path, "dir")}>
-                <FolderPlus size={14} />
-                {menu.node.path ? "新建子目录…" : "新建目录…"}
-              </button>
+              <ContextSubmenu label="新建">
+                <button onClick={() => startCreate(menu.node.path, "file")}>
+                  <FilePlus2 size={14} />
+                  {menu.node.path ? "新建子文件…" : "新建文件…"}
+                </button>
+                <button onClick={() => startCreate(menu.node.path, "dir")}>
+                  <FolderPlus size={14} />
+                  {menu.node.path ? "新建子目录…" : "新建目录…"}
+                </button>
+              </ContextSubmenu>
               <button onClick={() => openWorking(menu.node.path, "folder")}>
                 <FolderOpen size={14} />
                 打开文件夹
@@ -3031,6 +3119,7 @@ function Worktree({
                   粘贴{clipboard.cut ? "（移动）" : ""}
                 </button>
               )}
+              {menu.node.path && <div className="context-separator" />}
               {menu.node.path &&
                 flattenTree(menu.node).some(isChanged) && (
                   <button
@@ -3056,34 +3145,48 @@ function Worktree({
                     移除 Git 跟踪
                   </button>
                 )}
+              {menu.node.path && <div className="context-separator" />}
               {menu.node.path && (
                 <>
-                  <button
-                    onClick={() => {
-                      void navigator.clipboard.writeText(menu.node.path);
-                      setMenu(undefined);
-                    }}
-                  >
-                    <Copy size={14} />
-                    复制相对路径
-                  </button>
-                  <button
-                    onClick={() => {
-                      void navigator.clipboard.writeText(menu.node.name);
-                      setMenu(undefined);
-                    }}
-                  >
-                    <Copy size={14} />
-                    复制名称
-                  </button>
-                  <button onClick={() => copyEntry(menu.node, false)}>
-                    <Copy size={14} />
-                    复制
-                  </button>
-                  <button onClick={() => copyEntry(menu.node, true)}>
-                    <Scissors size={14} />
-                    剪切
-                  </button>
+                  <ContextSubmenu label="复制">
+                    <button
+                      onClick={() => {
+                        void navigator.clipboard.writeText(menu.node.path);
+                        setMenu(undefined);
+                      }}
+                    >
+                      <Copy size={14} />
+                      复制相对路径
+                    </button>
+                    <button
+                      onClick={() => {
+                        void navigator.clipboard.writeText(
+                          absoluteWorkingPath(c.path, menu.node.path),
+                        );
+                        setMenu(undefined);
+                      }}
+                    >
+                      <Copy size={14} />
+                      复制绝对路径
+                    </button>
+                    <button
+                      onClick={() => {
+                        void navigator.clipboard.writeText(menu.node.name);
+                        setMenu(undefined);
+                      }}
+                    >
+                      <Copy size={14} />
+                      复制名称
+                    </button>
+                    <button onClick={() => copyEntry(menu.node, false)}>
+                      <Copy size={14} />
+                      复制到剪贴板
+                    </button>
+                    <button onClick={() => copyEntry(menu.node, true)}>
+                      <Scissors size={14} />
+                      剪切
+                    </button>
+                  </ContextSubmenu>
                   <button
                     onClick={() => {
                       setRenameTarget(menu.node);
@@ -3123,18 +3226,33 @@ function Worktree({
                 <FolderOpen size={14} />
                 打开文件所在位置
               </button>
-              <button onClick={() => startCreate(parentPath(menu.node.path), "file")}>
-                <FilePlus2 size={14} />
-                新建同级文件…
-              </button>
-              <button onClick={() => startCreate(parentPath(menu.node.path), "dir")}>
-                <FolderPlus size={14} />
-                新建同级目录…
-              </button>
-              <button onClick={() => pasteInto(menu.node)} disabled={!clipboard}>
+              <div className="context-separator" />
+              <ContextSubmenu label="新建">
+                <button
+                  onClick={() =>
+                    startCreate(parentPath(menu.node.path), "file")
+                  }
+                >
+                  <FilePlus2 size={14} />
+                  新建同级文件…
+                </button>
+                <button
+                  onClick={() =>
+                    startCreate(parentPath(menu.node.path), "dir")
+                  }
+                >
+                  <FolderPlus size={14} />
+                  新建同级目录…
+                </button>
+              </ContextSubmenu>
+              <button
+                onClick={() => pasteInto(menu.node)}
+                disabled={!clipboard}
+              >
                 <ClipboardPaste size={14} />
                 粘贴{clipboard?.cut ? "（移动）" : ""}
               </button>
+              <div className="context-separator" />
               {isChanged(menu.node.file!) && (
                 <button
                   onClick={() =>
@@ -3155,32 +3273,46 @@ function Worktree({
                   移除 Git 跟踪
                 </button>
               )}
-              <button
-                onClick={() => {
-                  void navigator.clipboard.writeText(menu.node.path);
-                  setMenu(undefined);
-                }}
-              >
-                <Copy size={14} />
-                复制相对路径
-              </button>
-              <button
-                onClick={() => {
-                  void navigator.clipboard.writeText(menu.node.name);
-                  setMenu(undefined);
-                }}
-              >
-                <Copy size={14} />
-                复制文件名
-              </button>
-              <button onClick={() => copyEntry(menu.node, false)}>
-                <Copy size={14} />
-                复制
-              </button>
-              <button onClick={() => copyEntry(menu.node, true)}>
-                <Scissors size={14} />
-                剪切
-              </button>
+              <div className="context-separator" />
+              <ContextSubmenu label="复制">
+                <button
+                  onClick={() => {
+                    void navigator.clipboard.writeText(menu.node.path);
+                    setMenu(undefined);
+                  }}
+                >
+                  <Copy size={14} />
+                  复制相对路径
+                </button>
+                <button
+                  onClick={() => {
+                    void navigator.clipboard.writeText(
+                      absoluteWorkingPath(c.path, menu.node.path),
+                    );
+                    setMenu(undefined);
+                  }}
+                >
+                  <Copy size={14} />
+                  复制绝对路径
+                </button>
+                <button
+                  onClick={() => {
+                    void navigator.clipboard.writeText(menu.node.name);
+                    setMenu(undefined);
+                  }}
+                >
+                  <Copy size={14} />
+                  复制文件名
+                </button>
+                <button onClick={() => copyEntry(menu.node, false)}>
+                  <Copy size={14} />
+                  复制到剪贴板
+                </button>
+                <button onClick={() => copyEntry(menu.node, true)}>
+                  <Scissors size={14} />
+                  剪切
+                </button>
+              </ContextSubmenu>
               <button
                 onClick={() => {
                   setRenameTarget(menu.node);
@@ -3202,7 +3334,7 @@ function Worktree({
       )}
       {newFileOpen && (
         <Modal
-          title={newItemKind === "dir" ? "新建目录" : "新建文件"}
+          title="新建文件或目录"
           onClose={() => setNewFileOpen(false)}
         >
           <form
@@ -3212,14 +3344,16 @@ function Worktree({
             }}
           >
             <Field
-              label={newItemKind === "dir" ? "目录路径" : "文件路径"}
-              hint="相对仓库根目录，例如 src/new.ts"
+              label={newEntryIsDirectory ? "目录路径" : "文件路径"}
+              hint="相对仓库根目录；路径以 / 或 \\ 结尾时创建目录。"
             >
               <input
                 autoFocus
                 value={newFileName}
                 onChange={(e) => setNewFileName(e.target.value)}
-                placeholder={newItemKind === "dir" ? "src/new-folder" : "src/new.ts"}
+                placeholder={
+                  newEntryIsDirectory ? "src/new-folder/" : "src/new.ts"
+                }
               />
             </Field>
             {newFileError && (
@@ -3232,7 +3366,7 @@ function Worktree({
                 取消
               </button>
               <button className="primary" disabled={!newFileName.trim()}>
-                创建
+                {newEntryIsDirectory ? "创建目录" : "创建文件"}
               </button>
             </div>
           </form>
@@ -3292,6 +3426,12 @@ type FileTreeNode = {
 function parentPath(path: string) {
   const index = path.lastIndexOf("/");
   return index < 0 ? "" : path.slice(0, index);
+}
+
+function absoluteWorkingPath(root: string, path: string) {
+  if (!path) return root;
+  const separator = root.includes("\\") ? "\\" : "/";
+  return `${root.replace(/[\\/]+$/, "")}${separator}${path.replace(/\//g, separator)}`;
 }
 
 function findTreeNode(
@@ -3403,18 +3543,22 @@ function FileStatusBar({
   info,
   busy,
   language,
+  wordWrap,
   readOnly = false,
   onChange,
   onLanguage,
+  onToggleWrap,
   onOpenDefault,
   onReveal,
 }: {
   info: WorkingFileInfo;
   busy: boolean;
   language: LanguageId;
+  wordWrap: boolean;
   readOnly?: boolean;
   onChange?: (encoding: string, lineEnding: string) => void;
   onLanguage?: (language: LanguageId) => void;
+  onToggleWrap: () => void;
   onOpenDefault: () => void;
   onReveal: () => void;
 }) {
@@ -3456,6 +3600,17 @@ function FileStatusBar({
         )}
         {textFile && (
           <span className="filebar-readonly">{languageLabel(language)}</span>
+        )}
+        {textFile && (
+          <button
+            type="button"
+            className="filebar-action"
+            title="切换自动换行"
+            onClick={onToggleWrap}
+          >
+            <WrapText size={12} />
+            {wordWrap ? "不换行" : "换行"}
+          </button>
         )}
         <span className="filebar-readonly">历史版本 · 只读</span>
       </div>
@@ -3563,6 +3718,17 @@ function FileStatusBar({
           </div>
         )}
       </div>
+      {textFile && (
+        <button
+          type="button"
+          className="filebar-action"
+          title="切换自动换行"
+          onClick={onToggleWrap}
+        >
+          <WrapText size={12} />
+          {wordWrap ? "不换行" : "换行"}
+        </button>
+      )}
       {!textEditable && (
         <>
           <button type="button" className="filebar-action" onClick={onOpenDefault}>
@@ -3585,6 +3751,7 @@ function FilePreviewPane({
   preview,
   text,
   language,
+  wordWrap,
   loading,
   error,
   onClose,
@@ -3597,6 +3764,7 @@ function FilePreviewPane({
   preview?: WorkingFilePreview;
   text?: string;
   language: LanguageId;
+  wordWrap: boolean;
   loading: boolean;
   error: string;
   onClose: () => void;
@@ -3697,7 +3865,7 @@ function FilePreviewPane({
           <video controls src={source} />
         </div>
       ) : info.previewKind === "text" ? (
-        <CodePreview code={text || ""} language={language} />
+        <CodePreview code={text || ""} language={language} wordWrap={wordWrap} />
       ) : (
         <div className="desktop-preview-empty">
           <FileText size={42} strokeWidth={1.3} />
@@ -3713,14 +3881,35 @@ function FilePreviewPane({
   );
 }
 
-function CodePreview({ code, language }: { code: string; language: LanguageId }) {
+function CodePreview({
+  code,
+  language,
+  wordWrap,
+}: {
+  code: string;
+  language: LanguageId;
+  wordWrap: boolean;
+}) {
+  const lines = code.split("\n");
   return (
-    <div className="desktop-code-preview">
-      <pre>
-        <code
-          dangerouslySetInnerHTML={{ __html: highlightCode(code, language) }}
-        />
-      </pre>
+    <div
+      className={`desktop-code-preview${wordWrap ? " wrap" : ""}`}
+      role="region"
+      aria-label="文件内容预览"
+    >
+      <div className="code-lines">
+        {lines.map((line, index) => (
+          <div className="code-line" key={index}>
+            <span className="code-line-number">{index + 1}</span>
+            <span
+              className="code-line-text"
+              dangerouslySetInnerHTML={{
+                __html: highlightCode(line, language),
+              }}
+            />
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -3899,6 +4088,24 @@ function BinaryDiffPane({
       ) : (
         <Loading />
       )}
+    </div>
+  );
+}
+
+function ContextSubmenu({
+  label,
+  children,
+}: {
+  label: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="context-submenu">
+      <button type="button" className="context-submenu-trigger">
+        {label}
+        <ChevronRight size={13} />
+      </button>
+      <div className="context-submenu-panel">{children}</div>
     </div>
   );
 }
@@ -4168,18 +4375,169 @@ function diffChangeKind(diff: string) {
   return "modified";
 }
 
+type SplitDiffRow = {
+  type: "meta" | "hunk" | "context" | "change";
+  oldNo?: number;
+  newNo?: number;
+  oldText?: string;
+  newText?: string;
+};
+
+function splitDiffRows(text: string): SplitDiffRow[] {
+  const lines = text.split("\n");
+  const rows: SplitDiffRow[] = [];
+  let oldNo = 0;
+  let newNo = 0;
+  let index = 0;
+  while (index < lines.length) {
+    const line = lines[index];
+    const hunk = /^@@ -(\d+)(?:,\d+)? \+(\d+)/.exec(line);
+    if (hunk) {
+      oldNo = Number(hunk[1]);
+      newNo = Number(hunk[2]);
+      rows.push({ type: "hunk", oldText: line, newText: line });
+      index++;
+      continue;
+    }
+    if (line.startsWith("-") && !line.startsWith("---")) {
+      const oldStart = oldNo;
+      const oldLines: string[] = [];
+      while (
+        index < lines.length &&
+        lines[index].startsWith("-") &&
+        !lines[index].startsWith("---")
+      ) {
+        oldLines.push(lines[index].slice(1));
+        oldNo++;
+        index++;
+      }
+      const newStart = newNo;
+      const newLines: string[] = [];
+      while (
+        index < lines.length &&
+        lines[index].startsWith("+") &&
+        !lines[index].startsWith("+++")
+      ) {
+        newLines.push(lines[index].slice(1));
+        newNo++;
+        index++;
+      }
+      const count = Math.max(oldLines.length, newLines.length);
+      for (let offset = 0; offset < count; offset++) {
+        rows.push({
+          type: "change",
+          oldNo: oldLines[offset] === undefined ? undefined : oldStart + offset,
+          newNo: newLines[offset] === undefined ? undefined : newStart + offset,
+          oldText: oldLines[offset],
+          newText: newLines[offset],
+        });
+      }
+      continue;
+    }
+    if (line.startsWith("+") && !line.startsWith("+++")) {
+      const start = newNo;
+      const added: string[] = [];
+      while (
+        index < lines.length &&
+        lines[index].startsWith("+") &&
+        !lines[index].startsWith("+++")
+      ) {
+        added.push(lines[index].slice(1));
+        newNo++;
+        index++;
+      }
+      added.forEach((value, offset) =>
+        rows.push({
+          type: "change",
+          newNo: start + offset,
+          newText: value,
+        }),
+      );
+      continue;
+    }
+    if (line.startsWith(" ")) {
+      rows.push({
+        type: "context",
+        oldNo: oldNo++,
+        newNo: newNo++,
+        oldText: line.slice(1),
+        newText: line.slice(1),
+      });
+      index++;
+      continue;
+    }
+    rows.push({ type: "meta", oldText: line, newText: line });
+    index++;
+  }
+  return rows;
+}
+
+function SplitDiffView({
+  text,
+  language,
+  wordWrap,
+}: {
+  text: string;
+  language: LanguageId;
+  wordWrap: boolean;
+}) {
+  const rows = useMemo(() => splitDiffRows(text), [text]);
+  return (
+    <div className={`split-diff${wordWrap ? " wrap" : ""}`}>
+      <div className="split-diff-body">
+        {rows.map((row, index) =>
+          row.type === "meta" || row.type === "hunk" ? (
+            <div className={`split-diff-full ${row.type}`} key={index}>
+              <code
+                dangerouslySetInnerHTML={{
+                  __html: highlightCode(row.oldText || "", "plaintext"),
+                }}
+              />
+            </div>
+          ) : (
+            <div className="split-diff-row" key={index}>
+              <div
+                className={`split-diff-cell ${row.oldText === undefined ? "empty" : ""} ${row.oldText !== undefined && row.oldText !== row.newText ? "removed" : ""}`}
+              >
+                <span className="split-diff-number">{row.oldNo ?? ""}</span>
+                <code
+                  dangerouslySetInnerHTML={{
+                    __html: highlightCode(row.oldText || "", language),
+                  }}
+                />
+              </div>
+              <div
+                className={`split-diff-cell ${row.newText === undefined ? "empty" : ""} ${row.newText !== undefined && row.oldText !== row.newText ? "added" : ""}`}
+              >
+                <span className="split-diff-number">{row.newNo ?? ""}</span>
+                <code
+                  dangerouslySetInnerHTML={{
+                    __html: highlightCode(row.newText || "", language),
+                  }}
+                />
+              </div>
+            </div>
+          ),
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function DiffViewer({
   text,
   showFileHeaders = true,
   stats,
   fileCount,
   ignored = 0,
+  wordWrap = false,
 }: {
   text: string;
   showFileHeaders?: boolean;
   stats?: { additions: number; deletions: number };
   fileCount?: number;
   ignored?: number;
+  wordWrap?: boolean;
 }) {
   const [limit, setLimit] = useState(1500);
   const filteredStats = useMemo(() => diffStats(text), [text]);
@@ -4231,7 +4589,7 @@ export function DiffViewer({
     });
   }, [text, showFileHeaders]);
   return (
-    <div className="desktop-diff" role="region" aria-label="文件差异">
+    <div className={`desktop-diff${wordWrap ? " wrap" : ""}`} role="region" aria-label="文件差异">
       <div className="diff-summary" aria-label="差异统计">
         <span>{fileCount ?? filteredStats.files} 个文件</span>
         <span className="stat-add">+{shownStats.additions}</span>
@@ -4258,6 +4616,21 @@ export function DiffViewer({
     </div>
   );
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
