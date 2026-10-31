@@ -2,6 +2,8 @@
 
 基于 **Wails 3.0.0 + Go + React / TypeScript** 的多账号 Git 仓库桌面工具，目前支持 GitHub。每个本地副本可以独立绑定访问账号与提交身份，仓库 owner 不会用于推断当前登录账号。
 
+当前版本 **0.2.13**：第三方许可压缩内嵌到应用，`关于 → 第三方许可` 可查看；每个平台改为只发布一个更新包。
+
 ## 功能
 
 - 多账号 GitHub 授权、重新授权、会话级凭据、提交姓名与邮箱配置。
@@ -11,13 +13,14 @@
 - 文件编码与换行符状态栏、文本/图片/音频/视频/二进制预览。
 - 文件树复制、剪切、删除、重命名、新建文件或目录、终端与 VS Code 打开。
 - 统一 Diff、双栏 Diff、语法高亮、自动换行和带行号编辑器。
+- 第三方许可文本压缩内嵌，可在应用“关于 → 第三方许可”查看。
 - 应用内自更新。更新器只使用 GitHub Release 中的 `*-update.zip` 资产。
 
 ## 下载
 
-- Windows：`RepoBerth-<version>-windows-amd64.zip`，解压后运行 `RepoBerth.exe`。需要 Git 与 WebView2。
-- macOS Apple Silicon：`RepoBerth-<version>-macos-arm64.zip`。
-- 发行页同时提供完整包和应用内更新包；两者用途不同，见下方“发布资产”。
+- Windows：`RepoBerth-<version>-windows-amd64-update.zip`，解压后运行 `RepoBerth.exe`。需要 Git 与 WebView2。
+- macOS Apple Silicon：`RepoBerth-<version>-macos-arm64-update.zip`。
+- 同一个包既用于手动下载，也用于应用内更新；每个平台只发布一个压缩包和 `.sha256`。
 
 版本历史、下载地址和校验值请查看 [GitHub Releases](https://github.com/firmme/repo-berth/releases)。
 
@@ -31,22 +34,17 @@ node scripts/build.mjs
 .\bin\<version>\RepoBerth.exe
 ```
 
-Windows 构建需要 MinGW `windres` 生成 EXE 图标资源，可通过 `WINDRES` 指定路径。macOS 需要 Xcode Command Line Tools；Linux 需要 GTK4、WebKitGTK 6.0、X11 和 Secret Service。开发配置见 [DEVELOPER_SETUP.md](DEVELOPER_SETUP.md)。
+构建脚本会自动生成压缩的第三方许可清单并嵌入二进制。Windows 构建需要 MinGW `windres` 生成 EXE 图标资源，可通过 `WINDRES` 指定路径。macOS 需要 Xcode Command Line Tools；Linux 需要 GTK4、WebKitGTK 6.0、X11 和 Secret Service。开发配置见 [DEVELOPER_SETUP.md](DEVELOPER_SETUP.md)。
 
 ## 发布资产
 
-每个版本需要两类资产：
-
-- **完整包**：包含应用、README、验收记录和第三方许可，用于手动下载安装。
-- **更新包**：只包含一个顶层可执行文件或 `.app`，供 Wails v3 更新器替换使用。
-
-两者不能合并：更新器要求更新包只有一个顶层条目，而完整包必须包含文档和许可文件。发布时运行：
+每个平台只发布一个 `*-update.zip` 和一个 `.sha256`：
 
 ```powershell
-node scripts/package-windows.mjs
 node scripts/package-update.mjs
-node scripts/verify-package.mjs
 ```
+
+压缩包只包含一个顶层可执行文件或 `.app`，既满足更新器要求，也可直接解压运行。第三方许可、README 和依赖清单已压缩嵌入应用，发布时不再附带额外文件。`node scripts/package-windows.mjs` 仅保留用于生成完整开发验收包。
 
 macOS 同理生成 `*-macos-*-update.zip`。所有压缩包同时上传对应的 `.sha256`。
 
@@ -59,7 +57,7 @@ go vet ./...
 npm test --prefix frontend
 ```
 
-Windows 发行包使用 `node scripts/verify-package.mjs --no-native` 做压缩包、文件白名单和第三方许可校验。CI 在 Windows、macOS 和 Ubuntu 上运行构建与测试。
+第三方许可由 `node scripts/generate-notices.mjs` 生成并压缩嵌入；`node scripts/build.mjs` 会自动执行。CI 在 Windows、macOS 和 Ubuntu 上运行构建与测试。
 
 ## 数据与安全
 

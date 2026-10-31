@@ -105,6 +105,7 @@ import {
 export { DiffViewer } from "./diff-view";
 import { ScopePicker } from "./scope-picker";
 import { AccountsView, SettingsView } from "./settings";
+import { NoticesView } from "./notices";
 import { BindingModal, CloneForm, CloneURLForm, ShareForm } from "./repository";
 import { ImportModal, TaskRow } from "./workspace-tools";
 import {
@@ -140,7 +141,8 @@ type Panel =
   | "local-management"
   | "forget"
   | "share"
-  | "about";
+  | "about"
+  | "notices";
 type MenuNode = {
   label: string;
   action?: () => void;
@@ -1376,7 +1378,15 @@ export default function Desktop() {
             <h2>Repo Berth {version}</h2>
             <p>熟悉的 Git 工作流，独立的多账号身份。</p>
             <p>账号凭据保存在本设备的系统凭据库。</p>
+            <div className="form-actions">
+              <button onClick={() => show("notices")}>第三方许可</button>
+            </div>
           </div>
+        </Modal>
+      )}
+      {panel === "notices" && (
+        <Modal title="第三方许可" onClose={closePanel}>
+          <NoticesView />
         </Modal>
       )}
       {panel === "import" && (
@@ -3491,5 +3501,6 @@ function RelativeTime({ date }: { date: string }) {
   if (seconds < 7 * 86400) return <>{Math.floor(seconds / 86400)} 天前</>;
   return <>{value.toLocaleDateString("zh-CN")}</>;
 }
+
 
 

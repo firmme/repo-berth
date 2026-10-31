@@ -14,6 +14,10 @@ if (!clientId && !development)
 if (clientId && !/^[A-Za-z0-9_-]{8,128}$/.test(clientId))
   throw new Error("Invalid publisher OAuth Client ID");
 const suffix = development ? "-dev" : "";
+execFileSync(process.execPath, [join(root, "scripts/generate-notices.mjs")], {
+  cwd: root,
+  stdio: "inherit",
+});
 // cmd.exe is used only for this fixed npm command, with no interpolated data.
 if (process.platform === "win32")
   execFileSync("cmd.exe", ["/d", "/s", "/c", "npm run build"], {

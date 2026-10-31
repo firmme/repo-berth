@@ -207,6 +207,32 @@ export interface Commit {
   parents: number;
   tags: string[];
 }
+export interface ThirdPartyLicense {
+  file: string;
+  source: string;
+  sha256: string;
+  text: string;
+}
+
+export interface ThirdPartyDependency {
+  ecosystem: string;
+  name: string;
+  version: string;
+  declaredLicense?: string;
+  repository?: string;
+  provenance?: string;
+  licenses: ThirdPartyLicense[];
+}
+
+export interface ThirdPartyNotices {
+  schemaVersion: number;
+  version: string;
+  generatedAt: string;
+  links: Record<string, string>;
+  dependencies: ThirdPartyDependency[];
+  compressed: number;
+}
+
 export interface Branch {
   name: string;
   current: boolean;
@@ -229,3 +255,4 @@ export const emptyState: State = {
     autoUpdateDisabled: false,
   },
 };
+

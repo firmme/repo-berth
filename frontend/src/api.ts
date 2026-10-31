@@ -12,6 +12,7 @@ import type {
   FileEntry,
   RemoteCheck,
   LineEndingRisk,
+  ThirdPartyNotices,
   WorkingFileInfo,
   WorkingFilePreview,
   CommitBinaryDiff,
@@ -140,6 +141,8 @@ interface Methods {
   SwitchBranch: (id: string, name: string, create: boolean) => string;
   GitNetwork: (id: string, remote: string, operation: string) => string;
   CancelTask: (id: string) => void;
+  ThirdPartyNotices: () => ThirdPartyNotices;
+  OpenLink: (url: string) => void;
   CheckForUpdates: () => void;
 }
 export async function api<K extends keyof Methods>(
@@ -190,3 +193,4 @@ export function errorMessage(e: unknown): string {
   if (e && typeof e === "object" && "message" in e) return String(e.message);
   return "操作失败，请重试";
 }
+
