@@ -58,6 +58,8 @@ import {
   type WorkingFileInfo,
   type WorkingFilePreview,
   type CommitBinaryDiff,
+  type Branch,
+  type Commit,
 } from "./types";
 import { rowsFromState, filterRows, type Execute, type Row } from "./catalog";
 import { useUI } from "./ui";
@@ -155,7 +157,10 @@ export default function Desktop() {
     [pending, setPending] = useState(false),
     [repositorySearch, setRepositorySearch] = useState("");
   const [branchSearch, setBranchSearch] = useState(""),
-    [newBranch, setNewBranch] = useState("");
+    [newBranch, setNewBranch] = useState(""),
+    [collapsedBranchFolders, setCollapsedBranchFolders] = useState<Set<string>>(
+      new Set(),
+    );
   const [lastFetched, setLastFetched] = useState<Record<string, string>>({});
   const seenTasks = useRef<Set<string> | null>(null);
   const nativeCommands = useRef<Record<string, () => void>>({});
@@ -232,6 +237,9 @@ export default function Desktop() {
         t.state === "succeeded",
     )?.finishedAt ||
     "";
+  const statusUpdated = status.dataUpdatedAt
+    ? new Date(status.dataUpdatedAt).toISOString()
+    : "";
   const {
     account,
     profile,
@@ -281,17 +289,19 @@ export default function Desktop() {
   useEffect(() => {
     let off = () => {};
     let live = true;
-    void onAppActivated(() => checkRemoteUpdateRef.current()).then(
-      (dispose) => {
-        if (live) off = dispose;
-        else dispose();
-      },
-    );
+    void onAppActivated(() => {
+      checkRemoteUpdateRef.current();
+      void client.invalidateQueries({ queryKey: ["git", "status"] });
+      void client.invalidateQueries({ queryKey: ["state"] });
+    }).then((dispose) => {
+      if (live) off = dispose;
+      else dispose();
+    });
     return () => {
       live = false;
       off();
     };
-  }, []);
+  }, [client]);
   useEffect(() => {
     if (!loading) checkRemoteUpdateRef.current();
   }, [loading, checkout?.id, remote, busy]);
@@ -684,6 +694,16 @@ export default function Desktop() {
       {label}
     </button>
   );
+  const branchList = branches.data || [];
+  const localBranches = branchList.filter((branch) => !branch.remote);
+  const remoteBranches = branchList.filter((branch) => branch.remote);
+  const currentBranch = branchList.find((branch) => branch.current);
+  const switchBranch = (name: string) => {
+    void execute(async () => {
+      await api("SwitchBranch", checkout!.id, name, false);
+      setPopup("");
+    });
+  };
   const branchPopup = (
     <div className="desktop-popover branch-popover">
       <header>
@@ -705,26 +725,41 @@ export default function Desktop() {
         <ErrorNotice message={errorMessage(branches.error)} />
       ) : (
         <div className="branch-choices">
-          {branches.data
-            ?.filter((b) =>
-              b.name.toLowerCase().includes(branchSearch.toLowerCase()),
-            )
-            .map((b) => (
-              <button
-                disabled={busy || b.current}
-                key={b.name}
-                onClick={() =>
-                  void execute(async () => {
-                    await api("SwitchBranch", checkout!.id, b.name, false);
-                    setPopup("");
-                  })
-                }
-              >
-                <GitBranch size={15} />
-                {b.name}
-                {b.current && <Check size={15} />}
-              </button>
-            ))}
+          <div className="branch-heading">HEAD（当前分支）</div>
+          <div className="branch-current">
+            <GitBranch size={14} />
+            <strong>
+              {currentBranch?.name || status.data?.branch || "HEAD"}
+            </strong>
+            <Check size={14} />
+          </div>
+          <div className="branch-heading">本地</div>
+          <BranchTreeView
+            branches={localBranches}
+            prefix="local"
+            search={branchSearch}
+            collapsed={collapsedBranchFolders}
+            setCollapsed={setCollapsedBranchFolders}
+            onSwitch={switchBranch}
+            busy={busy}
+          />
+          {remoteBranches.length > 0 && (
+            <>
+              <div className="branch-heading">远程</div>
+              <BranchTreeView
+                branches={remoteBranches}
+                prefix="remote"
+                search={branchSearch}
+                collapsed={collapsedBranchFolders}
+                setCollapsed={setCollapsedBranchFolders}
+                onSwitch={switchBranch}
+                busy={busy}
+              />
+            </>
+          )}
+          {!branchList.some((branch) =>
+            branch.name.toLowerCase().includes(branchSearch.toLowerCase()),
+          ) && <p className="desktop-list-empty">没有匹配的分支</p>}
         </div>
       )}
       <form
@@ -905,17 +940,20 @@ export default function Desktop() {
               </span>
               {busy ? (
                 <small>执行中…</small>
+              ) : status.isError ? (
+                <small>状态读取失败</small>
               ) : remoteHasUpdates ? (
-                <small>远端有新提交</small>
-              ) : lastFetch ? (
                 <small>
-                  上次获取{" "}
-                  {new Date(lastFetch).toLocaleTimeString("zh-CN", {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  })}
+                  远端有新提交 · {formatSyncTime(statusUpdated || lastFetch)}
                 </small>
-              ) : null}
+              ) : statusUpdated || lastFetch ? (
+                <small>
+                  {statusUpdated ? "状态更新" : "上次获取"}{" "}
+                  {formatSyncTime(statusUpdated || lastFetch)}
+                </small>
+              ) : (
+                <small>等待状态同步</small>
+              )}
             </span>
           </button>
           {popupButton("network", <ChevronDown size={14} />, "network-more")}
@@ -2299,6 +2337,21 @@ function Worktree({
           />,
           fileBarSlot,
         )}
+      {tab === "history" &&
+        fileBarSlot &&
+        historyFile &&
+        historyFileInfo.data &&
+        createPortal(
+          <FileStatusBar
+            info={historyFileInfo.data}
+            busy={false}
+            language={detectLanguage(historyFile)}
+            readOnly
+            onOpenDefault={() => {}}
+            onReveal={() => {}}
+          />,
+          fileBarSlot,
+        )}
       <aside className="desktop-sidebar">
         <div className="desktop-tabs" role="tablist" aria-label="仓库内容">
           <button
@@ -2510,7 +2563,9 @@ function Worktree({
             ) : history.isError ? (
               <ErrorNotice message={errorMessage(history.error)} />
             ) : history.data?.length ? (
-              history.data.map((item) => (
+              history.data.map((item) => {
+                const labels = commitPills(item);
+                return (
                 <button
                   className={commit?.hash === item.hash ? "selected" : ""}
                   key={item.hash}
@@ -2519,6 +2574,19 @@ function Worktree({
                   <GitCommitHorizontal size={16} />
                   <span>
                     <strong>{item.subject}</strong>
+                    {labels.length > 0 && (
+                      <span className="commit-labels">
+                        {labels.map((label) => (
+                          <span
+                            key={label.key}
+                            className={label.className}
+                            title={label.title}
+                          >
+                            {label.label}
+                          </span>
+                        ))}
+                      </span>
+                    )}
                     <small>
                       {item.author} · <RelativeTime date={item.date} />
                     </small>
@@ -2529,7 +2597,8 @@ function Worktree({
                     </small>
                   </span>
                 </button>
-              ))
+                );
+              })
             ) : (
               <p className="desktop-list-empty">还没有提交记录</p>
             )}
@@ -3243,10 +3312,98 @@ function formatBytes(size: number) {
   return `${(size / (1024 * 1024)).toFixed(1)} MiB`;
 }
 
+const commitTypeLabels: Record<string, string> = {
+  feat: "功能",
+  fix: "修复",
+  hotfix: "修复",
+  docs: "文档",
+  style: "样式",
+  refactor: "重构",
+  perf: "性能",
+  test: "测试",
+  build: "构建",
+  ci: "CI",
+  chore: "杂项",
+  revert: "回滚",
+  release: "发布",
+};
+
+type CommitPill = { key: string; label: string; className: string; title: string };
+
+function commitPills(commit: Commit): CommitPill[] {
+  const pills: CommitPill[] = [];
+  const typeMatch = /^([a-zA-Z]+)(?:\([^)]*\))?!?:/.exec(commit.subject);
+  const type = typeMatch?.[1]?.toLowerCase() || "";
+  if (commitTypeLabels[type]) {
+    pills.push({
+      key: `type:${type}`,
+      label: commitTypeLabels[type],
+      className: `commit-pill type-${type}`,
+      title: `提交类型：${type}`,
+    });
+  }
+  if (commit.parents > 1) {
+    pills.push({
+      key: "merge",
+      label: "合并",
+      className: "commit-pill merge",
+      title: "合并提交",
+    });
+  }
+  const tags = commit.tags || [];
+  const release =
+    type !== "release" &&
+    (/^(?:chore\()?release(?:\)[^:]*)?!?:/i.test(commit.subject) ||
+      tags.some(
+        (tag) =>
+          /release/i.test(tag) ||
+          /^v?\d+(?:\.\d+){1,2}(?:[-+].*)?$/i.test(tag),
+      ));
+  if (release) {
+    pills.push({
+      key: "release",
+      label: "发布",
+      className: "commit-pill release",
+      title: "发布版本",
+    });
+  }
+  tags.slice(0, 2).forEach((tag) =>
+    pills.push({
+      key: `tag:${tag}`,
+      label: tag,
+      className: "commit-pill tag",
+      title: `标签：${tag}`,
+    }),
+  );
+  if (tags.length > 2) {
+    pills.push({
+      key: "tag-more",
+      label: `+${tags.length - 2}`,
+      className: "commit-pill tag",
+      title: tags.slice(2).join(", "),
+    });
+  }
+  return pills;
+}
+
+function formatSyncTime(value: string) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const now = new Date();
+  const sameDay = date.toDateString() === now.toDateString();
+  return date.toLocaleString("zh-CN", {
+    ...(sameDay ? {} : { month: "2-digit", day: "2-digit" }),
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 function FileStatusBar({
   info,
   busy,
   language,
+  readOnly = false,
   onChange,
   onLanguage,
   onOpenDefault,
@@ -3255,8 +3412,9 @@ function FileStatusBar({
   info: WorkingFileInfo;
   busy: boolean;
   language: LanguageId;
-  onChange: (encoding: string, lineEnding: string) => void;
-  onLanguage: (language: LanguageId) => void;
+  readOnly?: boolean;
+  onChange?: (encoding: string, lineEnding: string) => void;
+  onLanguage?: (language: LanguageId) => void;
   onOpenDefault: () => void;
   onReveal: () => void;
 }) {
@@ -3281,6 +3439,28 @@ function FileStatusBar({
     info.lineEnding === "CR"
       ? info.lineEnding
       : "LF";
+  if (readOnly) {
+    return (
+      <div className="desktop-filebar">
+        <span className="filebar-path" title={info.path}>
+          {info.path}
+        </span>
+        <span className="filebar-size">{formatBytes(info.size)}</span>
+        <span className="filebar-readonly">
+          {info.binary ? info.mimeType || "二进制" : info.encoding}
+        </span>
+        {!info.binary && (
+          <span className="filebar-readonly">
+            {info.lineEnding === "None" ? "无换行" : info.lineEnding}
+          </span>
+        )}
+        {textFile && (
+          <span className="filebar-readonly">{languageLabel(language)}</span>
+        )}
+        <span className="filebar-readonly">历史版本 · 只读</span>
+      </div>
+    );
+  }
   return (
     <div className="desktop-filebar">
       <span className="filebar-path" title={info.path}>
@@ -3305,7 +3485,7 @@ function FileStatusBar({
                   className={item.id === language ? "active" : ""}
                   onClick={() => {
                     setOpen("");
-                    onLanguage(item.id);
+                    onLanguage?.(item.id);
                   }}
                 >
                   {item.label}
@@ -3334,7 +3514,7 @@ function FileStatusBar({
                 className={value === info.encoding ? "active" : ""}
                 onClick={() => {
                   setOpen("");
-                  onChange(value, lineEnding);
+                  onChange?.(value, lineEnding);
                 }}
               >
                 {value}
@@ -3366,7 +3546,7 @@ function FileStatusBar({
                 className={value === info.lineEnding ? "active" : ""}
                 onClick={() => {
                   setOpen("");
-                  onChange(
+                  onChange?.(
                     ["UTF-8", "UTF-8 BOM", "UTF-16 LE", "UTF-16 BE"].includes(
                       info.encoding,
                     )
@@ -3723,6 +3903,137 @@ function BinaryDiffPane({
   );
 }
 
+type BranchTreeNode = {
+  name: string;
+  path: string;
+  branch?: Branch;
+  children: BranchTreeNode[];
+};
+
+function buildBranchTree(branches: Branch[]): BranchTreeNode[] {
+  type MutableNode = {
+    name: string;
+    path: string;
+    branch?: Branch;
+    children: Map<string, MutableNode>;
+  };
+  const root = new Map<string, MutableNode>();
+  for (const branch of branches) {
+    const parts = branch.name.split("/");
+    let children = root;
+    let prefix = "";
+    parts.forEach((part, index) => {
+      prefix = prefix ? `${prefix}/${part}` : part;
+      const leaf = index === parts.length - 1;
+      let node = children.get(part);
+      if (!node) {
+        node = {
+          name: part,
+          path: prefix,
+          branch: leaf ? branch : undefined,
+          children: new Map(),
+        };
+        children.set(part, node);
+      }
+      if (leaf) node.branch = branch;
+      else children = node.children;
+    });
+  }
+  const finish = (children: Map<string, MutableNode>): BranchTreeNode[] =>
+    [...children.values()]
+      .sort((a, b) =>
+        !a.branch && b.branch
+          ? -1
+          : a.branch && !b.branch
+            ? 1
+            : a.name.localeCompare(b.name),
+      )
+      .map((node) => ({
+        name: node.name,
+        path: node.path,
+        branch: node.branch,
+        children: finish(node.children),
+      }));
+  return finish(root);
+}
+
+function BranchTreeView({
+  branches,
+  prefix,
+  search,
+  collapsed,
+  setCollapsed,
+  onSwitch,
+  busy,
+}: {
+  branches: Branch[];
+  prefix: string;
+  search: string;
+  collapsed: Set<string>;
+  setCollapsed: (value: (old: Set<string>) => Set<string>) => void;
+  onSwitch: (name: string) => void;
+  busy: boolean;
+}) {
+  const filtered = useMemo(
+    () =>
+      branches.filter((branch) =>
+        branch.name.toLowerCase().includes(search.toLowerCase()),
+      ),
+    [branches, search],
+  );
+  const tree = useMemo(() => buildBranchTree(filtered), [filtered]);
+  const render = (nodes: BranchTreeNode[], depth: number): ReactNode[] =>
+    nodes.flatMap((node) => {
+      const key = `${prefix}:${node.path}`;
+      if (node.branch) {
+        const branch = node.branch;
+        return [
+          <button
+            type="button"
+            key={`leaf:${key}`}
+            className={`branch-leaf${branch.current ? " current" : ""}`}
+            style={{ paddingLeft: 12 + depth * 15 }}
+            title={branch.name}
+            disabled={busy || branch.current}
+            onClick={() => onSwitch(branch.name)}
+          >
+            <GitBranch size={13} />
+            <span>{node.name}</span>
+            {branch.current && <Check size={13} />}
+          </button>,
+        ];
+      }
+      const expanded = !!search || !collapsed.has(key);
+      return [
+        <button
+          type="button"
+          key={`folder:${key}`}
+          className="branch-folder"
+          style={{ paddingLeft: 10 + depth * 15 }}
+          aria-expanded={expanded}
+          onClick={() =>
+            setCollapsed((old) => {
+              const next = new Set(old);
+              if (next.has(key)) next.delete(key);
+              else next.add(key);
+              return next;
+            })
+          }
+        >
+          {expanded ? (
+            <ChevronDown size={13} />
+          ) : (
+            <ChevronRight size={13} />
+          )}
+          {expanded ? <FolderOpen size={13} /> : <Folder size={13} />}
+          <span>{node.name}</span>
+        </button>,
+        ...(expanded ? render(node.children, depth + 1) : []),
+      ];
+    });
+  return <div className="branch-tree">{render(tree, 0)}</div>;
+}
+
 function buildFileTree(
   files: FileStatus[],
   rootNode?: { name: string; path: string },
@@ -3947,6 +4258,9 @@ export function DiffViewer({
     </div>
   );
 }
+
+
+
 
 
 

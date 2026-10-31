@@ -64,18 +64,21 @@ type FileEntry struct {
 	Tracked bool   `json:"tracked"`
 }
 type Commit struct {
-	Hash       string `json:"hash"`
-	Author     string `json:"author"`
-	Email      string `json:"email"`
-	Date       string `json:"date"`
-	Subject    string `json:"subject"`
-	Files      int    `json:"files"`
-	Insertions int    `json:"insertions"`
-	Deletions  int    `json:"deletions"`
+	Hash       string   `json:"hash"`
+	Author     string   `json:"author"`
+	Email      string   `json:"email"`
+	Date       string   `json:"date"`
+	Subject    string   `json:"subject"`
+	Files      int      `json:"files"`
+	Insertions int      `json:"insertions"`
+	Deletions  int      `json:"deletions"`
+	Parents    int      `json:"parents"`
+	Tags       []string `json:"tags"`
 }
 type Branch struct {
 	Name    string `json:"name"`
 	Current bool   `json:"current"`
+	Remote  string `json:"remote"`
 }
 
 type cappedBuffer struct {
@@ -523,7 +526,7 @@ func (r Runner) CommitDiffFiltered(ctx context.Context, path, hash string) (stri
 	return r.Run(ctx, path, nil, nil, "show", "--format=", "--no-ext-diff", "--no-textconv", "--find-renames", "--ignore-cr-at-eol", hash, "--")
 }
 func (r Runner) History(ctx context.Context, path string) ([]Commit, error) {
-	out, err := r.Run(ctx, path, nil, nil, "log", "-50", "--numstat", "--format=%x1e%H%x00%an%x00%ae%x00%aI%x00%s")
+	out, err := r.Run(ctx, path, nil, nil, "log", "-50", "--numstat", "--format=%x1e%H%x00%an%x00%ae%x00%aI%x00%P%x00%D%x00%s")
 	if err != nil {
 		if _, headErr := r.Run(ctx, path, nil, nil, "rev-parse", "--verify", "HEAD"); headErr != nil {
 			return []Commit{}, nil
@@ -536,8 +539,8 @@ func (r Runner) History(ctx context.Context, path string) ([]Commit, error) {
 		if len(lines) == 0 {
 			continue
 		}
-		fields := strings.SplitN(lines[0], "\x00", 5)
-		if len(fields) != 5 {
+		fields := strings.SplitN(lines[0], "\x00", 7)
+		if len(fields) != 7 {
 			continue
 		}
 		commit := Commit{
@@ -545,7 +548,15 @@ func (r Runner) History(ctx context.Context, path string) ([]Commit, error) {
 			Author:  fields[1],
 			Email:   fields[2],
 			Date:    fields[3],
-			Subject: fields[4],
+			Parents: len(strings.Fields(fields[4])),
+			Tags:    []string{},
+			Subject: fields[6],
+		}
+		for _, decoration := range strings.Split(fields[5], ", ") {
+			decoration = strings.TrimSpace(decoration)
+			if tag, ok := strings.CutPrefix(decoration, "tag: "); ok && tag != "" {
+				commit.Tags = append(commit.Tags, tag)
+			}
 		}
 		for _, line := range lines[1:] {
 			parts := strings.SplitN(strings.TrimSpace(line), "\t", 3)
@@ -573,8 +584,23 @@ func (r Runner) Branches(ctx context.Context, path string) ([]Branch, error) {
 	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
 		p := strings.SplitN(line, "\x00", 2)
 		if len(p) == 2 {
-			result = append(result, Branch{strings.TrimSpace(p[1]), strings.TrimSpace(p[0]) == "*"})
+			result = append(result, Branch{Name: strings.TrimSpace(p[1]), Current: strings.TrimSpace(p[0]) == "*"})
 		}
+	}
+	remotesOut, err := r.Run(ctx, path, nil, nil, "for-each-ref", "--format=%(refname:short)", "refs/remotes/")
+	if err != nil {
+		return nil, err
+	}
+	for _, line := range strings.Split(strings.TrimSpace(remotesOut), "\n") {
+		name := strings.TrimSpace(line)
+		if name == "" || strings.HasSuffix(name, "/HEAD") {
+			continue
+		}
+		remote, _, ok := strings.Cut(name, "/")
+		if !ok {
+			continue
+		}
+		result = append(result, Branch{Name: name, Remote: remote})
 	}
 	return result, nil
 }
@@ -656,6 +682,26 @@ func (r Runner) Switch(ctx context.Context, path, name string, create bool) erro
 	}
 	if _, err := r.Run(ctx, path, nil, nil, "check-ref-format", "--branch", name); err != nil {
 		return model.Err("BRANCH_INVALID", "分支名称无效")
+	}
+	if !create {
+		if remote, local, ok := strings.Cut(name, "/"); ok && local != "" {
+			if remotes, err := r.Run(ctx, path, nil, nil, "remote"); err == nil {
+				for _, candidate := range strings.Split(strings.TrimSpace(remotes), "\n") {
+					if strings.TrimSpace(candidate) != remote {
+						continue
+					}
+					if _, err := r.Run(ctx, path, nil, nil, "show-ref", "--verify", "--quiet", "refs/remotes/"+name); err != nil {
+						break
+					}
+					if _, err := r.Run(ctx, path, nil, nil, "show-ref", "--verify", "--quiet", "refs/heads/"+local); err == nil {
+						name = local
+						break
+					}
+					_, err := r.Run(ctx, path, nil, nil, "switch", "--track", name)
+					return err
+				}
+			}
+		}
 	}
 	args := []string{"switch"}
 	if create {

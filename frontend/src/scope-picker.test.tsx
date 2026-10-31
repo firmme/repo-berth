@@ -29,6 +29,10 @@ it("renders the GitHub avatar and falls back to initials if loading fails", () =
   expect(screen.queryByRole("img")).toBeNull();
   expect(screen.getByText("WO")).toBeTruthy();
 });
+it("marks accounts that need authorization with a yellow warning badge", () => {
+  render(<AccountAvatar account={{ ...account, status: "auth_required" }} />);
+  expect(screen.getByLabelText("需要重新授权")).toBeTruthy();
+});
 it("does not use an untrusted avatar protocol or host", () => {
   render(
     <AccountAvatar
@@ -66,3 +70,4 @@ it("shows distinct scope icons and account avatars and supports keyboard selecti
   await user.keyboard("{End}{Enter}");
   expect(change).toHaveBeenLastCalledWith("account:work");
 });
+

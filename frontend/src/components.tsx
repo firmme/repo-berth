@@ -104,6 +104,7 @@ export function AccountAvatar({
   size?: number;
 }) {
   const [failedURL, setFailedURL] = useState("");
+  const needsAuthorization = account.status === "auth_required";
   const source = /^https:\/\/avatars\.githubusercontent\.com\//i.test(
     account.avatar || "",
   )
@@ -111,7 +112,8 @@ export function AccountAvatar({
     : "";
   return (
     <span
-      className="account-avatar"
+      className={`account-avatar ${needsAuthorization ? "auth-warning" : ""}`}
+      title={needsAuthorization ? "需要重新授权" : undefined}
       style={{
         width: size,
         height: size,
@@ -131,6 +133,15 @@ export function AccountAvatar({
       ) : (
         <span aria-hidden="true">
           {account.login.slice(0, 2).toUpperCase()}
+        </span>
+      )}
+      {needsAuthorization && (
+        <span
+          className="account-auth-warning"
+          aria-label="需要重新授权"
+          role="status"
+        >
+          !
         </span>
       )}
     </span>

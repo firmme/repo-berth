@@ -485,3 +485,68 @@ func TestDiffIgnoresCarriageReturnOnlyChanges(t *testing.T) {
 		t.Fatalf("carriage-return-only change was shown: %q", diff)
 	}
 }
+func TestBranchesIncludesRemotesAndTracksThem(t *testing.T) {
+	path := initRepo(t)
+	r := Runner{}
+	ctx := context.Background()
+	_ = os.WriteFile(filepath.Join(path, "file.txt"), []byte("main"), 0600)
+	_ = r.Stage(ctx, path, "file.txt", true)
+	_ = r.Commit(ctx, path, "main", "Test", "test@example.com")
+	testGit(t, path, "remote", "add", "origin", "https://github.com/org/project.git")
+	testGit(t, path, "update-ref", "refs/remotes/origin/topic", "HEAD")
+	branches, err := r.Branches(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var foundRemote bool
+	for _, branch := range branches {
+		if branch.Name == "origin/topic" && branch.Remote == "origin" && !branch.Current {
+			foundRemote = true
+		}
+	}
+	if !foundRemote {
+		t.Fatalf("remote branch missing: %+v", branches)
+	}
+	if err := r.Switch(ctx, path, "origin/topic", false); err != nil {
+		t.Fatal(err)
+	}
+	current := strings.TrimSpace(testGit(t, path, "branch", "--show-current"))
+	if current != "topic" {
+		t.Fatalf("remote branch did not create local tracking branch: %q", current)
+	}
+}
+func TestHistoryIncludesTagsAndMergeMetadata(t *testing.T) {
+	path := initRepo(t)
+	r := Runner{}
+	ctx := context.Background()
+	_ = os.WriteFile(filepath.Join(path, "main.txt"), []byte("main"), 0600)
+	_ = r.Stage(ctx, path, "main.txt", true)
+	_ = r.Commit(ctx, path, "main", "Test", "test@example.com")
+	testGit(t, path, "tag", "v1.0.0")
+	_ = r.Switch(ctx, path, "feature", true)
+	_ = os.WriteFile(filepath.Join(path, "feature.txt"), []byte("feature"), 0600)
+	_ = r.Stage(ctx, path, "feature.txt", true)
+	_ = r.Commit(ctx, path, "feature", "Test", "test@example.com")
+	_ = r.Switch(ctx, path, "main", false)
+	testGit(t, path, "-c", "user.name=Test", "-c", "user.email=test@example.com", "merge", "--no-ff", "feature", "-m", "merge feature")
+	history, err := r.History(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mergeFound, tagFound bool
+	for _, commit := range history {
+		if commit.Subject == "merge feature" && commit.Parents > 1 {
+			mergeFound = true
+		}
+		if commit.Subject == "main" {
+			for _, tag := range commit.Tags {
+				if tag == "v1.0.0" {
+					tagFound = true
+				}
+			}
+		}
+	}
+	if !mergeFound || !tagFound {
+		t.Fatalf("missing merge or tag metadata: %+v", history)
+	}
+}

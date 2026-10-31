@@ -204,10 +204,13 @@ export interface Commit {
   files: number;
   insertions: number;
   deletions: number;
+  parents: number;
+  tags: string[];
 }
 export interface Branch {
   name: string;
   current: boolean;
+  remote: string;
 }
 export const emptyState: State = {
   accounts: [],
