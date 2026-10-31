@@ -11,6 +11,14 @@ import {
   Save,
   GitCommitHorizontal,
   Settings2,
+  UsersRound,
+  Terminal,
+  FolderOpen,
+  Code2,
+  Download,
+  Pencil,
+  RefreshCw,
+  X,
 } from "lucide-react";
 import { api, errorMessage, isDesktop } from "./api";
 import { useUI } from "./ui";
@@ -294,7 +302,10 @@ export function AccountsView({ st, execute }: { st: State; execute: Execute }) {
             网站上的授权可在 GitHub 设置中另行撤销。
           </p>
           <div className="form-actions">
-            <button onClick={() => setRemove(undefined)}>取消</button>
+            <button onClick={() => setRemove(undefined)}>
+              <X size={14} />
+              取消
+            </button>
             <button
               className="danger"
               onClick={() =>
@@ -304,6 +315,7 @@ export function AccountsView({ st, execute }: { st: State; execute: Execute }) {
                 })
               }
             >
+              <Trash2 size={14} />
               移除账号
             </button>
           </div>
@@ -384,7 +396,7 @@ function AccountPanel({
           <span>{profile.email}</span>
         </div>
       )}
-      {a.status === "auth_required" && <div className="account-footer"><button className="text-button" onClick={onAuthorize}>重新授权</button></div>}
+      {a.status === "auth_required" && <div className="account-footer"><button className="text-button" onClick={onAuthorize}><KeyRound size={14} />重新授权</button></div>}
       {profileOpen && (
         <ProfileModal
           account={a}
@@ -471,6 +483,7 @@ function ProfileModal({
         )}
         <div className="form-actions">
           <button type="button" onClick={onClose}>
+            <X size={14} />
             取消
           </button>
           <button className="primary">
@@ -491,7 +504,7 @@ export function SettingsView({ st, execute }: { st: State; execute: Execute }) {
     <div className="page-content settings-page">
       <div className="page-heading inset-heading">
         <div>
-          <h1>设置</h1>
+          <h1><Settings2 size={18} /> 设置</h1>
         </div>
       </div>
       <CredentialCleanupNotice st={st} execute={execute} />
@@ -507,20 +520,21 @@ export function SettingsView({ st, execute }: { st: State; execute: Execute }) {
       >
         <section className="settings-row">
           <div>
-            <h2>GitHub 账号</h2>
+            <h2><UsersRound size={16} /> GitHub 账号</h2>
           </div>
           <div className="settings-panel">
             <button
               type="button"
               onClick={() => useUI.getState().set({ view: "accounts" })}
             >
+              <UsersRound size={15} />
               管理 GitHub 账号
             </button>
           </div>
         </section>
         <section className="settings-row">
           <div>
-            <h2>Git 环境</h2>
+            <h2><Terminal size={16} /> Git 环境</h2>
           </div>
           <div className="settings-panel">
             <Field label="Git 可执行文件">
@@ -546,6 +560,7 @@ export function SettingsView({ st, execute }: { st: State; execute: Execute }) {
                 })()
               }
             >
+              <RefreshCw size={15} />
               保存并检测 Git
             </button>
             {version && (
@@ -559,7 +574,7 @@ export function SettingsView({ st, execute }: { st: State; execute: Execute }) {
         </section>
         <section className="settings-row">
           <div>
-            <h2>仓库与编辑器</h2>
+            <h2><FolderOpen size={16} /> 仓库与编辑器</h2>
           </div>
           <div className="settings-panel">
             <DirectoryField
@@ -586,7 +601,7 @@ export function SettingsView({ st, execute }: { st: State; execute: Execute }) {
         </section>
         <section className="settings-row">
           <div>
-            <h2>应用更新</h2>
+            <h2><RefreshCw size={16} /> 应用更新</h2>
           </div>
           <div className="settings-panel">
             <label className="checkbox-label">
@@ -647,6 +662,7 @@ function CredentialCleanupNotice({
             })
           }
         >
+          <RefreshCw size={14} />
           {busy ? "正在清理…" : "重试清理旧凭据"}
         </button>
       </div>

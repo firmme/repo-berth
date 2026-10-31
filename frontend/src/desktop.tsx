@@ -46,6 +46,13 @@ import {
   Eye,
   WrapText,
   Save,
+  Download,
+  Info,
+  Palette,
+  Share2,
+  Sun,
+  Moon,
+  Monitor,
 } from "lucide-react";
 import { version } from "../package.json";
 import { api, errorMessage, isDesktop, onAppActivated, onStateChanged } from "./api";
@@ -710,6 +717,34 @@ export default function Desktop() {
       },
     ],
   };
+  const menuIcons: Record<string, ReactNode> = {
+    "file.import": <FolderPlus size={14} />,
+    "file.manage-local": <FolderGit2 size={14} />,
+    "file.clone": <Download size={14} />,
+    "app.settings": <Settings2 size={14} />,
+    "edit.open-editor": <Code2 size={14} />,
+    "edit.copy-path": <Copy size={14} />,
+    "view.changes": <FileText size={14} />,
+    "view.history": <Clock3 size={14} />,
+    "view.refresh": <RefreshCw size={14} />,
+    "view.wrap": <WrapText size={14} />,
+    "view.tasks": <Activity size={14} />,
+    "view.theme.system": <Monitor size={14} />,
+    "view.theme.light": <Sun size={14} />,
+    "view.theme.dark": <Moon size={14} />,
+    "repository.open-vscode": <Code2 size={14} />,
+    "repository.open-folder": <FolderOpen size={14} />,
+    "repository.open-github": <Github size={14} />,
+    "repository.share": <Share2 size={14} />,
+    "repository.settings": <Settings2 size={14} />,
+    "repository.favorite": <Star size={14} />,
+    "branch.switch": <GitBranch size={14} />,
+    "update.check": <RefreshCw size={14} />,
+    "help.accounts": <UsersRound size={14} />,
+    "help.about": <Info size={14} />,
+  };
+  const menuIcon = (nativeAction?: string) =>
+    nativeAction ? menuIcons[nativeAction] : undefined;
   const commands: Record<string, () => void> = {
     "branch.switch": () => setPopup("branch"),
   };
@@ -860,7 +895,10 @@ export default function Desktop() {
                           className="menu-submenu-trigger"
                           disabled={item.disabled}
                         >
-                          {item.label}
+                          <span className="menu-item-label">
+                            {menuIcon(item.nativeAction)}
+                            {item.label}
+                          </span>
                           <ChevronRight size={14} />
                         </button>
                         <div className="menu-submenu-panel">
@@ -873,7 +911,10 @@ export default function Desktop() {
                                 child.action();
                               }}
                             >
-                              {child.label}
+                              <span className="menu-item-label">
+                                {menuIcon(child.nativeAction)}
+                                {child.label}
+                              </span>
                               {child.checked && <Check size={14} />}
                             </button>
                           ))}
@@ -889,7 +930,10 @@ export default function Desktop() {
                           item.action?.();
                         }}
                       >
-                        {item.label}
+                        <span className="menu-item-label">
+                          {menuIcon(item.nativeAction)}
+                          {item.label}
+                        </span>
                         {item.checked && <Check size={14} />}
                       </button>
                     ),
