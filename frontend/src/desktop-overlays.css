@@ -1042,3 +1042,105 @@
 .menu-popover button.checked .menu-item-label > svg {
   color: var(--accent);
 }
+.tree-toggle-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  min-height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--secondary-text);
+}
+.tree-toggle-button:hover {
+  background: var(--row-hover);
+  color: var(--text);
+}
+.file-rename {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+.file-rename-old {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--secondary-text);
+  text-decoration: line-through;
+}
+.file-rename-arrow {
+  flex: none;
+  color: var(--secondary-text);
+}
+.tree-folder.status-ignored,
+.desktop-file-row.tree-file.status-ignored .file-name,
+.desktop-file-row.tree-file.status-ignored > code {
+  color: var(--faint);
+}
+.tree-folder.status-untracked,
+.desktop-file-row.tree-file.status-untracked .file-name {
+  color: #9a6700;
+}
+.tree-folder.status-modified,
+.desktop-file-row.tree-file.status-modified .file-name {
+  color: #4a6f93;
+}
+.tree-folder.status-added,
+.desktop-file-row.tree-file.status-added .file-name {
+  color: #1a7f37;
+}
+.tree-folder.status-deleted,
+.desktop-file-row.tree-file.status-deleted .file-name {
+  color: #cf222e;
+}
+.tree-folder.status-renamed,
+.desktop-file-row.tree-file.status-renamed .file-name {
+  color: #8250df;
+}
+.desktop-file-row.tree-file.status-ignored .file-name svg {
+  color: var(--faint);
+}
+.desktop-file-row.tree-file.status-untracked .file-name svg {
+  color: #bf8700;
+}
+.desktop-file-row.tree-file.status-modified .file-name svg {
+  color: #5b83a9;
+}
+.desktop-file-row.tree-file.status-added .file-name svg {
+  color: #1a7f37;
+}
+.desktop-file-row.tree-file.status-deleted .file-name svg {
+  color: #cf222e;
+}
+.desktop-file-row.tree-file.status-renamed .file-name svg {
+  color: #8250df;
+}
+.desktop-file-row.tree-file > code.ignored {
+  color: var(--faint);
+  font-size: 9px;
+  font-style: normal;
+}
+:root[data-theme="dark"] .tree-folder.status-untracked,
+:root[data-theme="dark"] .desktop-file-row.tree-file.status-untracked .file-name {
+  color: #f0c674;
+}
+:root[data-theme="dark"] .tree-folder.status-modified,
+:root[data-theme="dark"] .desktop-file-row.tree-file.status-modified .file-name {
+  color: #8bb8e8;
+}
+:root[data-theme="dark"] .tree-folder.status-added,
+:root[data-theme="dark"] .desktop-file-row.tree-file.status-added .file-name {
+  color: #7ee787;
+}
+:root[data-theme="dark"] .tree-folder.status-deleted,
+:root[data-theme="dark"] .desktop-file-row.tree-file.status-deleted .file-name {
+  color: #ff9099;
+}
+:root[data-theme="dark"] .tree-folder.status-renamed,
+:root[data-theme="dark"] .desktop-file-row.tree-file.status-renamed .file-name {
+  color: #d2a8ff;
+}

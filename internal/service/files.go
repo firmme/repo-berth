@@ -212,3 +212,23 @@ func (s *Service) UntrackFile(id, file string, recursive bool) error {
 	_, err = s.runner().Run(s.ctx, c.Path, nil, nil, args...)
 	return err
 }
+
+func (s *Service) ForceTrackFile(id, file string) error {
+	c, err := s.gitCheckout(id)
+	if err != nil {
+		return err
+	}
+	if err := gitexec.ValidFile(file); err != nil {
+		return err
+	}
+	lock := s.workLock(c.Path)
+	if err := lock.Lock(s.ctx); err != nil {
+		return err
+	}
+	defer lock.Unlock()
+	if err := s.validateCheckout(c); err != nil {
+		return err
+	}
+	_, err = s.runner().Run(s.ctx, c.Path, nil, nil, "add", "-f", "--", file)
+	return err
+}

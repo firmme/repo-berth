@@ -68,10 +68,12 @@ func TestFileEditingIgnoreAndUntrack(t *testing.T) {
 		t.Fatal(err)
 	}
 	paths := map[string]bool{}
+	ignored := map[string]bool{}
 	for _, entry := range entries {
 		paths[entry.Path] = true
+		ignored[entry.Path] = entry.Ignored
 	}
-	if !paths["tracked.txt"] || !paths["other.txt"] || paths["src/new.txt"] {
+	if !paths["tracked.txt"] || !paths["other.txt"] || !paths["src/new.txt"] || !ignored["src/new.txt"] {
 		t.Fatalf("unexpected complete file list: %+v", entries)
 	}
 

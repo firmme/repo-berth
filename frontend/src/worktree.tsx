@@ -4,6 +4,8 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ChevronDown,
   ChevronRight,
+  ChevronsDown,
+  ChevronsUp,
   GitBranch,
   RefreshCw,
   ArrowDown,
@@ -84,6 +86,9 @@ import {
   fileStats,
   findTreeNode,
   flattenTree,
+  folderPaths,
+  fileStatusKind,
+  folderStatusKind,
   hasStaged,
   hasUnstaged,
   parentPath,
@@ -144,7 +149,7 @@ export function Worktree({
     [stageOverrides, setStageOverrides] = useState<Record<string, boolean>>({}),
     [stagingPaths, setStagingPaths] = useState<Set<string>>(new Set()),
     [stageError, setStageError] = useState(""),
-    [changesCollapsed, setChangesCollapsed] = useState<Set<string>>(new Set()),
+    [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set()),
     [menu, setMenu] = useState<{
       x: number;
       y: number;
@@ -229,6 +234,8 @@ export function Worktree({
           index: " ",
           worktree: " ",
           tracked: entry.tracked,
+          ignored: entry.ignored,
+          isDir: entry.directory,
         }
       );
     });
@@ -272,6 +279,28 @@ export function Worktree({
       ? selectedNode.path
       : parentPath(selectedNode.path)
     : "";
+  const allFolderPaths = useMemo(() => folderPaths(tree), [tree]);
+  const initializedFoldersKey = useRef("");
+  useEffect(() => {
+    const key = `${c.id}:${fileView}`;
+    if (initializedFoldersKey.current === key || !tree.length) return;
+    initializedFoldersKey.current = key;
+    if (fileView === "changes") {
+      setExpandedFolders(new Set(folderPaths(tree)));
+      return;
+    }
+    const next = new Set<string>();
+    if (tree.length === 1 && tree[0].path === "") {
+      next.add(tree[0].path);
+      for (const child of tree[0].children)
+        if (child.isDir) next.add(child.path);
+    } else {
+      for (const node of tree) if (node.isDir) next.add(node.path);
+    }
+    setExpandedFolders(next);
+  }, [tree, c.id, fileView]);
+  const expandAllTree = () => setExpandedFolders(new Set(allFolderPaths));
+  const collapseAllTree = () => setExpandedFolders(new Set());
   const confirmDiscard = () =>
     !editing ||
     editorText === editorOriginal ||
@@ -393,12 +422,12 @@ export function Worktree({
       setTreeSelected(name);
       if (!directory) await openEditor(name);
       else {
-        setChangesCollapsed((old) => {
+        setExpandedFolders((old) => {
           const next = new Set(old);
-          next.delete("");
           const parts = name.split("/");
+          next.add("");
           for (let index = 1; index < parts.length; index++)
-            next.delete(parts.slice(0, index).join("/"));
+            next.add(parts.slice(0, index).join("/"));
           return next;
         });
       }
@@ -490,6 +519,14 @@ export function Worktree({
       await client.invalidateQueries({ queryKey: ["git", "files", c.id] });
     });
   };
+  const forceTrackNode = (node: FileTreeNode) => {
+    setMenu(undefined);
+    void execute(async () => {
+      await api("ForceTrackFile", c.id, node.path);
+      await client.invalidateQueries({ queryKey: ["git", "status", c.id] });
+      await client.invalidateQueries({ queryKey: ["git", "files", c.id] });
+    });
+  };
   const untrackNode = (node: FileTreeNode) => {
     setMenu(undefined);
     if (
@@ -511,16 +548,16 @@ export function Worktree({
   const renderTree = (nodes: FileTreeNode[], depth: number): ReactNode[] =>
     nodes.flatMap((node) => {
       if (node.isDir) {
-        const expanded = !!filter || !changesCollapsed.has(node.path);
+        const expanded = !!filter || expandedFolders.has(node.path);
         const stats = treeStats(node);
         return [
           <div
-            className={`tree-folder ${treeSelected === node.path ? "selected" : ""}`}
+            className={`tree-folder status-${folderStatusKind(node)} ${treeSelected === node.path ? "selected" : ""}`}
             key={`folder:${node.path}`}
             style={{ paddingLeft: 8 + depth * 14 }}
             onClick={() => {
               setTreeSelected(node.path);
-              setChangesCollapsed((old) => {
+              setExpandedFolders((old) => {
                 const next = new Set(old);
                 if (next.has(node.path)) next.delete(node.path);
                 else next.add(node.path);
@@ -553,7 +590,7 @@ export function Worktree({
       const changed = isChanged(item);
       return [
         <div
-          className={`desktop-file-row tree-file ${file?.path === item.path ? "selected" : ""} ${treeSelected === item.path ? "tree-selected" : ""}`}
+          className={`desktop-file-row tree-file status-${fileStatusKind(item)} ${file?.path === item.path ? "selected" : ""} ${treeSelected === item.path ? "tree-selected" : ""}`}
           key={`file:${item.path}`}
           style={{ paddingLeft: 6 + depth * 14 }}
           onContextMenu={(event) => openMenu(event, node)}
@@ -593,10 +630,18 @@ export function Worktree({
             }}
           >
             <FileText size={13} />
-            <span>
-              {item.originalPath ? `${item.originalPath} → ` : ""}
-              {node.name}
-            </span>
+            {item.originalPath ? (
+              <span
+                className="file-rename"
+                title={`${item.originalPath} → ${item.path}`}
+              >
+                <span className="file-rename-old">{item.originalPath}</span>
+                <span className="file-rename-arrow">→</span>
+                <span>{node.name}</span>
+              </span>
+            ) : (
+              <span>{node.name}</span>
+            )}
           </button>
           <span className="file-line-stats">
             {stats.additions > 0 && (
@@ -606,19 +651,36 @@ export function Worktree({
               <span className="stat-del">−{stats.deletions}</span>
             )}
           </span>
-          {changed && (
+          {(changed || item.ignored) && (
             <code
               className={
-                item.index === "?" || item.index === "A"
-                  ? "added"
-                  : item.index === "D" || item.worktree === "D"
-                    ? "removed"
-                    : ""
+                item.ignored
+                  ? "ignored"
+                  : item.index === "?" || item.index === "A"
+                    ? "added"
+                    : item.index === "D" || item.worktree === "D"
+                      ? "removed"
+                      : ""
+              }
+              title={
+                item.ignored
+                  ? "已忽略"
+                  : fileStatusKind(item) === "untracked"
+                    ? "未跟踪"
+                    : fileStatusKind(item) === "renamed"
+                      ? "重命名"
+                      : fileStatusKind(item) === "added"
+                        ? "新增"
+                        : fileStatusKind(item) === "deleted"
+                          ? "删除"
+                          : "修改"
               }
             >
-              {item.index === "?"
-                ? "+"
-                : item.worktree.trim() || item.index.trim()}
+              {item.ignored
+                ? "I"
+                : item.index === "?"
+                  ? "+"
+                  : item.worktree.trim() || item.index.trim()}
             </code>
           )}
         </div>,
@@ -1027,6 +1089,28 @@ export function Worktree({
                 <FilePlus2 size={13} />
                 新建
               </button>
+              {fileView === "all" && (
+                <>
+                  <button
+                    type="button"
+                    className="tree-toggle-button"
+                    title="展开全部"
+                    aria-label="展开全部"
+                    onClick={expandAllTree}
+                  >
+                    <ChevronsDown size={13} />
+                  </button>
+                  <button
+                    type="button"
+                    className="tree-toggle-button"
+                    title="折叠全部"
+                    aria-label="折叠全部"
+                    onClick={collapseAllTree}
+                  >
+                    <ChevronsUp size={13} />
+                  </button>
+                </>
+              )}
             </div>
             {stageError && <div className="desktop-stage-error" role="alert">{stageError}</div>}
             <div
@@ -1244,7 +1328,10 @@ export function Worktree({
                 <div className="desktop-history-content">
                   <nav className="desktop-history-tree" aria-label="提交文件树">
                     <div className="history-tree-heading">文件变更 <span>{historyFiles.length}</span></div>
-                    <button className={!historyFile ? "selected" : ""} onClick={() => setHistoryFile("")}>\n                      <Files size={14} />\n                      全部文件\n                    </button>
+                    <button className={!historyFile ? "selected" : ""} onClick={() => setHistoryFile("")}>
+                      <Files size={14} />
+                      全部文件
+                    </button>
                     {historyFiles.flatMap(({ path, kind }, index) => {
                       const parts = path.split("/");
                       const folders = parts.slice(0, -1);
@@ -1463,7 +1550,11 @@ export function Worktree({
                 <ArrowLeft size={16} />
               </button>
               <FileText size={16} />
-              <strong>{activeFile.path}</strong>
+              <strong>
+                {file?.originalPath
+                  ? `${file.originalPath} → ${activeFile.path}`
+                  : activeFile.path}
+              </strong>
               <span>{activeFile.staged ? "已暂存" : "工作区"}</span>
               {file && (
                 <span className="file-line-stats">
@@ -1489,6 +1580,14 @@ export function Worktree({
               >
                 <Columns2 size={14} />
                 {diffMode === "split" ? "统一差异" : "并排差异"}
+              </button>
+              <button
+                className="diff-edit-button"
+                title="显示完整文件内容"
+                onClick={() => openPreview(activeFile.path)}
+              >
+                <Eye size={14} />
+                完整文件
               </button>
               <button
                 className="diff-edit-button"
@@ -1649,6 +1748,7 @@ export function Worktree({
         stageNode={stageNode}
         nodeStaged={nodeStaged}
         ignoreNode={ignoreNode}
+        forceTrackNode={forceTrackNode}
         untrackNode={untrackNode}
         openWorking={openWorking}
         startCreate={startCreate}
@@ -1764,4 +1864,6 @@ function RelativeTime({ date }: { date: string }) {
   if (seconds < 7 * 86400) return <>{Math.floor(seconds / 86400)} 天前</>;
   return <>{value.toLocaleDateString("zh-CN")}</>;
 }
+
+
 

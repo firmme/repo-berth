@@ -123,6 +123,8 @@ export interface FileStatus {
   index: string;
   worktree: string;
   tracked?: boolean;
+  ignored?: boolean;
+  isDir?: boolean;
   indexAdditions?: number;
   indexDeletions?: number;
   worktreeAdditions?: number;
@@ -184,6 +186,8 @@ export interface CommitBinaryDiff {
 export interface FileEntry {
   path: string;
   tracked: boolean;
+  ignored: boolean;
+  directory: boolean;
 }
 export interface GitStatus {
   branch: string;
@@ -255,4 +259,6 @@ export const emptyState: State = {
     autoUpdateDisabled: false,
   },
 };
+
+
 

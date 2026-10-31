@@ -259,7 +259,10 @@ export function DiffViewer({
       {lines.length > limit && (
         <div className="diff-more">
           已显示 {limit} / {lines.length} 行。
-          <button onClick={() => setLimit((n) => n + 1500)}>\n            <ChevronDown size={14} />\n            继续显示\n          </button>
+          <button onClick={() => setLimit((n) => n + 1500)}>
+            <ChevronDown size={14} />
+            继续显示
+          </button>
         </div>
       )}
     </div>

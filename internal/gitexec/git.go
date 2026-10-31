@@ -60,8 +60,10 @@ type Remote struct {
 	PushURL string `json:"pushUrl"`
 }
 type FileEntry struct {
-	Path    string `json:"path"`
-	Tracked bool   `json:"tracked"`
+	Path      string `json:"path"`
+	Tracked   bool   `json:"tracked"`
+	Ignored   bool   `json:"ignored"`
+	Directory bool   `json:"directory"`
 }
 type Commit struct {
 	Hash       string   `json:"hash"`
@@ -325,10 +327,16 @@ func (r Runner) Files(ctx context.Context, path string) ([]FileEntry, error) {
 	if err != nil {
 		return nil, err
 	}
+	ignored, err := r.Run(ctx, path, nil, nil, "ls-files", "-z", "--others", "--ignored", "--exclude-standard")
+	if err != nil {
+		return nil, err
+	}
 	entries := []FileEntry{}
 	seen := map[string]bool{}
-	add := func(raw string, isTracked bool) error {
+	add := func(raw string, isTracked, isIgnored bool) error {
 		for _, file := range strings.Split(raw, "\x00") {
+			directory := strings.HasSuffix(file, "/")
+			file = strings.TrimSuffix(file, "/")
 			if file == "" || seen[file] {
 				continue
 			}
@@ -336,14 +344,17 @@ func (r Runner) Files(ctx context.Context, path string) ([]FileEntry, error) {
 				return model.Err("FILE_LIMIT", "仓库文件过多，请使用筛选或外部工具查看")
 			}
 			seen[file] = true
-			entries = append(entries, FileEntry{Path: file, Tracked: isTracked})
+			entries = append(entries, FileEntry{Path: file, Tracked: isTracked, Ignored: isIgnored, Directory: directory})
 		}
 		return nil
 	}
-	if err := add(tracked, true); err != nil {
+	if err := add(tracked, true, false); err != nil {
 		return nil, err
 	}
-	if err := add(others, false); err != nil {
+	if err := add(others, false, false); err != nil {
+		return nil, err
+	}
+	if err := add(ignored, false, true); err != nil {
 		return nil, err
 	}
 	return entries, nil
@@ -399,15 +410,15 @@ func embeddedCredentials(raw string) bool {
 }
 func (r Runner) Status(ctx context.Context, path string) (Status, error) {
 	s := Status{Files: []FileStatus{}, Remotes: []Remote{}, Tracking: []RemoteTracking{}}
-	out, err := r.Run(ctx, path, nil, nil, "status", "--porcelain=v1", "-z", "--untracked-files=all")
+	out, err := r.Run(ctx, path, nil, nil, "status", "--porcelain=v1", "-z", "--untracked-files=all", "--renames")
 	if err != nil {
 		return s, err
 	}
 	s.Files = ParseStatus(out)
-	if raw, err := r.Run(ctx, path, nil, nil, "diff", "--numstat", "-z"); err == nil {
+	if raw, err := r.Run(ctx, path, nil, nil, "diff", "--numstat", "-z", "-M"); err == nil {
 		applyNumstat(s.Files, raw, false)
 	}
-	if raw, err := r.Run(ctx, path, nil, nil, "diff", "--cached", "--numstat", "-z"); err == nil {
+	if raw, err := r.Run(ctx, path, nil, nil, "diff", "--cached", "--numstat", "-z", "-M"); err == nil {
 		applyNumstat(s.Files, raw, true)
 	}
 	branch, err := r.Run(ctx, path, nil, nil, "symbolic-ref", "--short", "-q", "HEAD")

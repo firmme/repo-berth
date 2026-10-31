@@ -62,7 +62,7 @@ export function buildFileTree(
         children.set(part, node);
       }
       if (leaf) {
-        node.isDir = false;
+        node.isDir = !!file.isDir;
         node.file = file;
       } else {
         node.isDir = true;
@@ -134,3 +134,41 @@ export function hasUnstaged(f: FileStatus) {
   return f.worktree !== " " || f.index === "?";
 }
 
+
+export function folderPaths(nodes: FileTreeNode[]): string[] {
+  return nodes.flatMap((node) =>
+    node.isDir ? [node.path, ...folderPaths(node.children)] : [],
+  );
+}
+
+export type FileStatusKind =
+  | "normal"
+  | "ignored"
+  | "untracked"
+  | "added"
+  | "deleted"
+  | "renamed"
+  | "modified";
+
+export function fileStatusKind(file: FileStatus): FileStatusKind {
+  if (file.ignored) return "ignored";
+  if (file.index === "?" || file.worktree === "?" || file.tracked === false)
+    return "untracked";
+  if (file.originalPath) return "renamed";
+  if (file.index === "A") return "added";
+  if (file.index === "D" || file.worktree === "D") return "deleted";
+  if (hasStaged(file) || hasUnstaged(file)) return "modified";
+  return "normal";
+}
+
+export function folderStatusKind(node: FileTreeNode): FileStatusKind {
+  if (!node.isDir) return node.file ? fileStatusKind(node.file) : "normal";
+  if (node.file?.ignored) return "ignored";
+  const kinds = node.children.map(folderStatusKind);
+  if (!kinds.length) return "normal";
+  if (kinds.every((kind) => kind === "ignored")) return "ignored";
+  if (kinds.some((kind) => ["added", "deleted", "renamed", "modified"].includes(kind)))
+    return "modified";
+  if (kinds.some((kind) => kind === "untracked")) return "untracked";
+  return "normal";
+}

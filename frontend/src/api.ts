@@ -136,6 +136,7 @@ interface Methods {
     lineEnding: string,
   ) => void;
   AddToGitignore: (id: string, file: string, directory: boolean) => void;
+  ForceTrackFile: (id: string, file: string) => void;
   UntrackFile: (id: string, file: string, recursive: boolean) => void;
   CommitChanges: (id: string, remote: string, message: string) => string;
   SwitchBranch: (id: string, name: string, create: boolean) => string;
@@ -193,4 +194,5 @@ export function errorMessage(e: unknown): string {
   if (e && typeof e === "object" && "message" in e) return String(e.message);
   return "操作失败，请重试";
 }
+
 

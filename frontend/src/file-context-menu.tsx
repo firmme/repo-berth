@@ -11,6 +11,7 @@ import {
   FolderOpen,
   FolderPlus,
   Pencil,
+  Plus,
   Scissors,
   Terminal,
   Trash2,
@@ -37,6 +38,7 @@ type Props = {
   stageNode: (node: FileTreeNode, next: boolean) => void;
   nodeStaged: (node: FileTreeNode) => boolean;
   ignoreNode: (node: FileTreeNode) => void;
+  forceTrackNode: (node: FileTreeNode) => void;
   untrackNode: (node: FileTreeNode) => void;
   openWorking: (path: string, kind: string) => void;
   startCreate: (base: string, kind: "file" | "dir") => void;
@@ -60,6 +62,7 @@ export function FileContextMenu({
   stageNode,
   nodeStaged,
   ignoreNode,
+  forceTrackNode,
   untrackNode,
   openWorking,
   startCreate,
@@ -119,6 +122,13 @@ export function FileContextMenu({
                     {nodeStaged(menu.node) ? "取消暂存目录" : "暂存目录"}
                   </button>
                 )}
+              {menu.node.path &&
+                flattenTree(menu.node).some((file) => file.ignored) && (
+                  <button onClick={() => forceTrackNode(menu.node)}>
+                    <Plus size={14} />
+                    强制跟踪
+                  </button>
+                )}
               {menu.node.path && (
                 <button onClick={() => ignoreNode(menu.node)}>
                   <EyeOff size={14} />
@@ -131,7 +141,7 @@ export function FileContextMenu({
                 ) && (
                   <button onClick={() => untrackNode(menu.node)}>
                     <Trash2 size={14} />
-                    移除 Git 跟踪
+                    停止跟踪
                   </button>
                 )}
               {menu.node.path && <div className="context-separator" />}
@@ -251,6 +261,12 @@ export function FileContextMenu({
                   {nodeStaged(menu.node) ? "取消暂存" : "暂存"}
                 </button>
               )}
+              {menu.node.file!.ignored && (
+                <button onClick={() => forceTrackNode(menu.node)}>
+                  <Plus size={14} />
+                  强制跟踪
+                </button>
+              )}
               <button onClick={() => ignoreNode(menu.node)}>
                 <EyeOff size={14} />
                 添加到 .gitignore
@@ -259,7 +275,7 @@ export function FileContextMenu({
                 menu.node.file!.index !== "?") && (
                 <button onClick={() => untrackNode(menu.node)}>
                   <Trash2 size={14} />
-                  移除 Git 跟踪
+                  停止跟踪
                 </button>
               )}
               <div className="context-separator" />
