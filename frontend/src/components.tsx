@@ -253,3 +253,19 @@ export function RepositoryMark({
     </span>
   );
 }
+
+export function ActionRow({
+  title,
+  action,
+  onClick,
+}: {
+  title: string;
+  action: string;
+  onClick: () => void;
+}) {
+  return (
+    <button className="desktop-action-row" title={title} onClick={onClick}>
+      {action}
+    </button>
+  );
+}
