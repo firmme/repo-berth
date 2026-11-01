@@ -4,6 +4,16 @@
 
 当前版本 **0.2.14**：全部文件树支持忽略/未跟踪/修改/新增/删除/重命名彩色状态，默认只展开顶层目录并按需渲染；修改文件可切换完整内容；文件树支持展开/折叠全部；右键菜单新增强制跟踪、停止跟踪和添加到 .gitignore。
 
+## 截图
+
+<p>
+  <img src="docs/screenshots/all-files.webp" width="49%" alt="全部文件与状态颜色" />
+  <img src="docs/screenshots/diff.webp" width="49%" alt="变更 Diff 与换行统计" />
+</p>
+<p>
+  <img src="docs/screenshots/preview.webp" width="80%" alt="完整文件预览与状态栏" />
+</p>
+
 ## 功能
 
 - 多账号 GitHub 授权、重新授权、会话级凭据、提交姓名与邮箱配置。
