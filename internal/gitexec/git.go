@@ -316,8 +316,6 @@ func (r Runner) Remotes(ctx context.Context, path string) ([]Remote, error) {
 	return result, nil
 }
 
-// Files lists tracked files and untracked files that are not ignored. It never
-// walks ignored dependency or build directories.
 func (r Runner) Files(ctx context.Context, path string) ([]FileEntry, error) {
 	tracked, err := r.Run(ctx, path, nil, nil, "ls-files", "-z")
 	if err != nil {
