@@ -173,12 +173,14 @@ export function TaskRow({
   execute,
   onClone,
   onOpenCheckout,
+  unread = false,
 }: {
   task: Task;
   st: State;
   execute: Execute;
   onClone: () => void;
   onOpenCheckout: () => void;
+  unread?: boolean;
 }) {
   const busy = t.state === "running" || t.state === "queued";
   const target =
@@ -190,9 +192,18 @@ export function TaskRow({
     t.kind,
   );
   return (
-    <article className="task-row">
+    <article className={`task-row${unread ? " is-unread" : ""}`}>
       <div>
-        <strong>{taskNames[t.kind] || t.kind}</strong>
+        <strong>
+          {unread && (
+            <span
+              className={`task-unread-dot${t.state === "failed" ? " failed" : ""}`}
+              role="img"
+              aria-label="未读"
+            />
+          )}
+          {taskNames[t.kind] || t.kind}
+        </strong>
         <span className={`task-state ${t.state}`}>
           {stateNames[t.state] || t.state}
         </span>

@@ -192,7 +192,6 @@ export default function Desktop() {
     () => localStorage.getItem("repo-berth-wrap") === "true",
   );
   const [tab, setTab] = useState<"changes" | "history">("changes");
-  const [showCompletedTasks, setShowCompletedTasks] = useState(false);
   const [error, setError] = useState(""),
     [pending, setPending] = useState(false),
     [repositorySearch, setRepositorySearch] = useState("");
@@ -203,6 +202,7 @@ export default function Desktop() {
     );
   const [lastFetched, setLastFetched] = useState<Record<string, string>>({});
   const seenTasks = useRef<Set<string> | null>(null);
+  const notifiedTasks = useRef<Set<string> | null>(null);
   const nativeCommands = useRef<Record<string, () => void>>({});
   const {
     data: st = emptyState,
@@ -354,6 +354,17 @@ export default function Desktop() {
   const activeTasks = st.tasks.filter((t) =>
     ["queued", "running"].includes(t.state),
   );
+  const unreadTasks = st.tasks.filter((t) => ui.unreadTaskIds.includes(t.id));
+  const unreadCount = unreadTasks.length;
+  const unreadFailed = unreadTasks.some((t) => t.state === "failed");
+  const tasksLabel = [
+    "任务中心",
+    unreadCount ? `${unreadCount} 条未读` : "",
+    activeTasks.length ? `${activeTasks.length} 项进行中` : "",
+    unreadFailed ? "有任务失败" : "",
+  ]
+    .filter(Boolean)
+    .join("，");
   const execute: Execute = async (fn) => {
     setError("");
     setPending(true);
@@ -437,6 +448,19 @@ export default function Desktop() {
         setLastFetched((values) => ({ ...values, [t.target]: t.finishedAt }));
     }
   }, [st.tasks, ui.commitSubmissions, loading]);
+  useEffect(() => {
+    if (!notifiedTasks.current) {
+      if (!loading)
+        notifiedTasks.current = new Set(st.tasks.map((t) => t.id));
+      return;
+    }
+    const fresh = st.tasks
+      .filter((t) => !notifiedTasks.current!.has(t.id))
+      .map((t) => t.id);
+    if (!fresh.length) return;
+    for (const id of fresh) notifiedTasks.current.add(id);
+    useUI.getState().markTasksUnread(fresh);
+  }, [st.tasks, loading]);
   useEffect(() => {
     if (ui.view === "accounts") setPanel("accounts");
     if (ui.view === "settings") setPanel("settings");
@@ -1363,32 +1387,63 @@ export default function Desktop() {
           <Settings2 size={13} />
           设置
         </button>
-        <button onClick={() => ui.set({ tasksOpen: !ui.tasksOpen })}>
+        <button
+          className={`desktop-tasks-toggle${unreadCount ? " has-unread" : ""}`}
+          aria-label={tasksLabel}
+          aria-expanded={ui.tasksOpen}
+          onClick={() => ui.set({ tasksOpen: !ui.tasksOpen })}
+        >
           <Activity size={13} />
           任务中心
+          {unreadCount > 0 && (
+            <span
+              className={`task-badge${unreadFailed ? " failed" : ""}`}
+              aria-hidden="true"
+            >
+              {unreadCount > 99 ? "99+" : unreadCount}
+            </span>
+          )}
           {activeTasks.length ? ` · ${activeTasks.length} 项进行中` : ""}
         </button>
       </footer>
       {ui.tasksOpen && (
         <aside className="task-drawer desktop-tasks" aria-label="任务中心">
           <header>
-            <h2>任务进度</h2>
-            <button
-              aria-label="关闭任务中心"
-              onClick={() => ui.set({ tasksOpen: false })}
-            >
-              <X size={18} />
-            </button>
+            <div className="desktop-tasks-title">
+              <h2>任务进度</h2>
+              <span className="desktop-tasks-count">
+                共 {st.tasks.length} 项
+                {unreadCount > 0 ? ` · ${unreadCount} 条未读` : ""}
+              </span>
+            </div>
+            <div className="desktop-tasks-actions">
+              {unreadCount > 0 && (
+                <button
+                  className="task-read-all"
+                  onClick={() => ui.markAllTasksRead()}
+                >
+                  <Check size={13} />
+                  全部已读
+                </button>
+              )}
+              <button
+                className="task-drawer-close"
+                aria-label="关闭任务中心"
+                onClick={() => ui.set({ tasksOpen: false })}
+              >
+                <X size={18} />
+              </button>
+            </div>
           </header>
-          {st.tasks.some((t) => t.state === "succeeded") && <button className="text-button" onClick={() => setShowCompletedTasks((v) => !v)}>{showCompletedTasks ? "隐藏已完成" : "查看已完成"}</button>}
           <div className="task-list">
-            {st.tasks.some((t) => showCompletedTasks || t.state !== "succeeded") ? (
-              st.tasks.filter((t) => showCompletedTasks || t.state !== "succeeded").map((t) => (
+            {st.tasks.length ? (
+              st.tasks.map((t) => (
                 <TaskRow
                   key={t.id}
                   task={t}
                   st={st}
                   execute={execute}
+                  unread={ui.unreadTaskIds.includes(t.id)}
                   onClone={() => {
                     if (t.cloneRequest?.url) { setCloneRequest(t.cloneRequest); show("clone-url"); }
                     else {
@@ -1401,7 +1456,7 @@ export default function Desktop() {
               ))
             ) : (
               <p className="desktop-list-empty">
-                当前没有进行中或失败的任务。
+                还没有任务。同步、克隆、推送等操作的进度会显示在这里。
               </p>
             )}
           </div>

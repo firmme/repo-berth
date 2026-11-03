@@ -2,7 +2,13 @@ import { beforeEach, expect, it } from "vitest";
 import { useUI } from "./ui";
 import type { Task } from "./types";
 
-beforeEach(() => useUI.setState({ commitDrafts: {}, commitSubmissions: {} }));
+beforeEach(() =>
+  useUI.setState({
+    commitDrafts: {},
+    commitSubmissions: {},
+    unreadTaskIds: [],
+  }),
+);
 const outcome = (state: string): Task => ({
   id: "commit-task",
   kind: "commit",
@@ -46,4 +52,11 @@ it("preserves edits written while a commit is running and releases interrupted a
   ui.settleCommitDrafts([outcome("interrupted")]);
   expect(useUI.getState().commitDrafts.work).toBe("next changes");
   expect(useUI.getState().commitSubmissions.work).toBeUndefined();
+});
+it("counts each task once and clears every unread notification together", () => {
+  useUI.getState().markTasksUnread(["first", "second"]);
+  useUI.getState().markTasksUnread(["second", "third"]);
+  expect(useUI.getState().unreadTaskIds).toEqual(["first", "second", "third"]);
+  useUI.getState().markAllTasksRead();
+  expect(useUI.getState().unreadTaskIds).toEqual([]);
 });

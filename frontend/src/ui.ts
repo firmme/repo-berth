@@ -8,8 +8,11 @@ interface UI {
   query: string;
   tasksOpen: boolean;
   menuOpen: boolean;
+  unreadTaskIds: string[];
   commitDrafts: Record<string, string>;
   commitSubmissions: Record<string, { taskId: string; message: string }>;
+  markTasksUnread: (ids: string[]) => void;
+  markAllTasksRead: () => void;
   setCommitDraft: (checkout: string, message: string) => void;
   submitCommitDraft: (
     checkout: string,
@@ -26,8 +29,18 @@ export const useUI = create<UI>((set) => ({
   query: "",
   tasksOpen: false,
   menuOpen: false,
+  unreadTaskIds: [],
   commitDrafts: {},
   commitSubmissions: {},
+  markTasksUnread: (ids) =>
+    set((s) => {
+      const next = new Set(s.unreadTaskIds);
+      for (const id of ids) next.add(id);
+      if (next.size === s.unreadTaskIds.length) return s;
+      return { unreadTaskIds: [...next] };
+    }),
+  markAllTasksRead: () =>
+    set((s) => (s.unreadTaskIds.length ? { unreadTaskIds: [] } : s)),
   setCommitDraft: (checkout, message) =>
     set((s) => ({ commitDrafts: { ...s.commitDrafts, [checkout]: message } })),
   submitCommitDraft: (checkout, taskId, message) =>

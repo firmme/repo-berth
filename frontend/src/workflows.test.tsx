@@ -21,16 +21,22 @@ import type { ReactNode } from "react";
 import { AccountsView } from "./settings";
 import { RepositoryDetail, CloneForm } from "./repository";
 import { DirectoryField } from "./components";
-import { emptyState, type State } from "./types";
+import { emptyState, type State, type Task } from "./types";
 import type { Execute, Row } from "./App";
 import App from "./App";
 import { useUI } from "./ui";
 
-const mocks = vi.hoisted(() => ({ api: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  api: vi.fn(),
+  refresh: [] as (() => void)[],
+}));
 vi.mock("./api", () => ({
   api: mocks.api,
   isDesktop: true,
-  onStateChanged: async () => () => {},
+  onStateChanged: async (refresh: () => void) => {
+    mocks.refresh.push(refresh);
+    return () => {};
+  },
   onAppActivated: async () => () => {},
   errorMessage: (error: unknown) =>
     error instanceof Error ? error.message : String(error),
@@ -126,9 +132,11 @@ beforeEach(() => {
     query: "",
     tasksOpen: false,
     menuOpen: false,
+    unreadTaskIds: [],
     commitDrafts: {},
     commitSubmissions: {},
   });
+  mocks.refresh.length = 0;
   mocks.api.mockReset();
   mocks.api.mockImplementation(async (name: string) => {
     if (name === "AccountEmails")
@@ -1133,5 +1141,76 @@ describe("first launch", () => {
     expect(
       screen.getByRole("button", { name: "设置" }),
     ).toBeTruthy();
+  });
+});
+describe("task center notifications", () => {
+  const task = (id: string, state: string, kind: string): Task => ({
+    id,
+    kind,
+    target: "checkout",
+    state,
+    progress: "",
+    errorCode: "",
+    error: "",
+    startedAt: new Date().toISOString(),
+    finishedAt: state === "succeeded" ? new Date().toISOString() : "",
+  });
+  it("keeps completed tasks visible and clears the unread badge on demand", async () => {
+    const state = fixture();
+    state.tasks = [task("done-push", "succeeded", "push")];
+    mocks.api.mockImplementation(async (name: string) =>
+      name === "Snapshot"
+        ? structuredClone(state)
+        : name === "GitVersion"
+          ? "git version 2.49.0"
+          : undefined,
+    );
+    const user = userEvent.setup();
+    mount(<App />);
+    await waitFor(() => expect(screen.queryByText("正在读取…")).toBeNull());
+    const idle = screen.getByRole("button", { name: "任务中心" });
+    expect(idle.querySelector(".task-badge")).toBeNull();
+
+    state.tasks = [task("fresh-fetch", "running", "fetch"), ...state.tasks];
+    mocks.refresh.forEach((refresh) => refresh());
+    const unread = await screen.findByRole("button", {
+      name: "任务中心，1 条未读，1 项进行中",
+    });
+    const badge = unread.querySelector(".task-badge") as HTMLElement;
+    expect(badge.textContent).toBe("1");
+    expect(badge.className).toBe("task-badge");
+
+    state.tasks[0] = {
+      ...state.tasks[0],
+      state: "failed",
+      errorCode: "AUTH_REQUIRED",
+      error: "授权失效",
+    };
+    mocks.refresh.forEach((refresh) => refresh());
+    const failed = await screen.findByRole("button", {
+      name: "任务中心，1 条未读，有任务失败",
+    });
+    expect(
+      (failed.querySelector(".task-badge") as HTMLElement).className,
+    ).toContain("failed");
+
+    await user.click(failed);
+    const drawer = await screen.findByRole("complementary", {
+      name: "任务中心",
+    });
+    expect(within(drawer).getByText("Push")).toBeTruthy();
+    expect(within(drawer).getByText("Fetch")).toBeTruthy();
+    expect(within(drawer).getAllByLabelText("未读")).toHaveLength(1);
+    expect(
+      within(drawer).queryByRole("button", { name: /已完成/ }),
+    ).toBeNull();
+
+    await user.click(within(drawer).getByRole("button", { name: "全部已读" }));
+    expect(
+      within(drawer).queryByRole("button", { name: "全部已读" }),
+    ).toBeNull();
+    expect(within(drawer).queryByLabelText("未读")).toBeNull();
+    expect(screen.getByRole("button", { name: "任务中心" })).toBeTruthy();
+    expect(within(drawer).getByText("Push")).toBeTruthy();
   });
 });
