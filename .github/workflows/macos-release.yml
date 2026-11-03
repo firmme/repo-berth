@@ -29,6 +29,7 @@ jobs:
       - run: node scripts/build.mjs --allow-unconfigured-auth
         env:
           REPO_BERTH_GITHUB_CLIENT_ID: ${{ vars.REPO_BERTH_GITHUB_CLIENT_ID }}
+      - run: node scripts/package-update.mjs
       - uses: actions/upload-artifact@v4
         with:
           name: repo-berth-macOS-ARM64
