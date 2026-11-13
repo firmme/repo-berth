@@ -16,6 +16,7 @@ import type {
   WorkingFileInfo,
   WorkingFilePreview,
   CommitBinaryDiff,
+  CheckoutHealth,
 } from "./types";
 import { emptyState } from "./types";
 
@@ -92,6 +93,7 @@ interface Methods {
   OpenRepository: (id: string) => void;
   OpenCheckoutGitHub: (id: string, remote: string) => void;
   GitStatus: (id: string) => GitStatus;
+  CheckoutHealth: (id: string) => CheckoutHealth;
   GitFiles: (id: string) => FileEntry[];
   CheckRemoteUpdate: (id: string, remote: string) => RemoteCheck;
   GitDiff: (id: string, file: string, staged: boolean) => string;

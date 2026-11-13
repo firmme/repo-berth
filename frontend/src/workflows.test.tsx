@@ -18,7 +18,7 @@ import {
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
-import { AccountsView } from "./settings";
+import { AccountsView, SettingsView } from "./settings";
 import { RepositoryDetail, CloneForm } from "./repository";
 import { DirectoryField } from "./components";
 import { emptyState, type State, type Task } from "./types";
@@ -279,6 +279,109 @@ describe("local checkout maintenance", () => {
     expect(await screen.findByRole("alert")).toHaveProperty(
       "textContent",
       "目录选择失败",
+    );
+  });
+});
+
+describe("repository tools", () => {
+  it("saves a custom default command-line program from settings", async () => {
+    const state = fixture();
+    mocks.api.mockImplementation(async (name: string) =>
+      name === "Snapshot" ? state : undefined,
+    );
+    const user = userEvent.setup();
+    mount(<SettingsView st={state} execute={execute} />);
+    const select = screen.getByLabelText(
+      /默认命令行程序/,
+    ) as HTMLSelectElement;
+    expect(select.value).toBe("");
+    await user.selectOptions(select, "__custom");
+    await user.type(
+      screen.getByLabelText(/命令行程序路径/),
+      "/usr/local/bin/my-terminal",
+    );
+    await user.click(screen.getByRole("button", { name: "保存设置" }));
+    await waitFor(() =>
+      expect(mocks.api).toHaveBeenCalledWith(
+        "SaveSettings",
+        expect.objectContaining({ terminalPath: "/usr/local/bin/my-terminal" }),
+      ),
+    );
+  });
+  it("opens the selected repository in the configured command line", async () => {
+    const state = fixture();
+    mocks.api.mockImplementation(async (name: string) => {
+      if (name === "Snapshot") return state;
+      if (name === "GitVersion") return "git version 2.49.0";
+      if (name === "GitStatus")
+        return {
+          branch: "main",
+          upstream: "",
+          ahead: 0,
+          behind: 0,
+          detached: false,
+          files: [],
+          remotes: [
+            {
+              name: "origin",
+              url: "https://github.com/org/project.git",
+              pushUrl: "https://github.com/org/project.git",
+            },
+          ],
+        };
+      if (name === "CheckoutHealth")
+        return { state: "ok", message: "仓库可正常读取" };
+      return undefined;
+    });
+    const user = userEvent.setup();
+    mount(<App />);
+    await user.click(await screen.findByRole("button", { name: /当前仓库/ }));
+    await user.click(
+      await screen.findByRole("button", { name: /D:\/Projects\/local-project/ }),
+    );
+    await user.click(screen.getByRole("button", { name: "仓库" }));
+    await user.click(screen.getByRole("button", { name: "用命令行打开" }));
+    await waitFor(() =>
+      expect(mocks.api).toHaveBeenCalledWith(
+        "OpenCheckout",
+        "checkout",
+        "terminal",
+      ),
+    );
+  });
+  it("warns when .git metadata is damaged and can forget the checkout without deleting files", async () => {
+    const state = fixture();
+    mocks.api.mockImplementation(async (name: string) => {
+      if (name === "Snapshot") return state;
+      if (name === "GitVersion") return "git version 2.49.0";
+      if (name === "GitStatus")
+        throw new Error("NOT_REPOSITORY: 该目录不是有效的 Git 仓库");
+      if (name === "CheckoutHealth")
+        return {
+          state: "corrupted",
+          message: "Git 无法读取 .git 元数据，仓库可能已损坏。",
+        };
+      return undefined;
+    });
+    const user = userEvent.setup();
+    mount(<App />);
+    await user.click(await screen.findByRole("button", { name: /当前仓库/ }));
+    await user.click(
+      await screen.findByRole("button", { name: /D:\/Projects\/local-project/ }),
+    );
+    expect(await screen.findByText("仓库元数据可能已损坏")).toBeTruthy();
+    await user.click(
+      screen.getByRole("button", { name: /移出损坏的仓库/ }),
+    );
+    const dialog = screen.getByRole("dialog", {
+      name: "将此本地副本移出管理？",
+    });
+    expect(
+      within(dialog).getByText(/不删除文件或 Git 历史/),
+    ).toBeTruthy();
+    await user.click(within(dialog).getByRole("button", { name: "移出管理" }));
+    await waitFor(() =>
+      expect(mocks.api).toHaveBeenCalledWith("ForgetCheckout", "checkout"),
     );
   });
 });

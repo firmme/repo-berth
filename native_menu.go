@@ -75,6 +75,7 @@ func installMacMenu(app *application.App, emit func(string, any)) {
 	repository := menu.AddSubmenu("仓库")
 	repository.Add("使用 VS Code 打开项目").OnClick(action("repository.open-vscode"))
 	repository.Add("在文件夹中打开").OnClick(action("repository.open-folder"))
+	repository.Add("用命令行打开").OnClick(action("repository.open-terminal"))
 	repository.Add("在 GitHub 中查看").OnClick(action("repository.open-github"))
 	repository.Add("分享到 GitHub…").OnClick(action("repository.share"))
 	repository.Add("仓库设置…").OnClick(action("repository.settings"))

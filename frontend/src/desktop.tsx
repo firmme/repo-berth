@@ -53,6 +53,7 @@ import {
   Sun,
   Moon,
   Monitor,
+  AlertTriangle,
 } from "lucide-react";
 import { version } from "../package.json";
 import { api, errorMessage, isDesktop, onAppActivated, onStateChanged } from "./api";
@@ -241,6 +242,18 @@ export default function Desktop() {
     enabled: !!checkout && !checkout.plainDirectory,
     refetchInterval: checkout ? 12000 : false,
   });
+  const health = useQuery({
+    queryKey: ["git", "health", checkout?.id],
+    queryFn: () => api("CheckoutHealth", checkout!.id),
+    enabled: !!checkout && !checkout.plainDirectory && status.isError,
+    retry: false,
+  });
+  const damagedCheckout =
+    status.isError &&
+    health.data &&
+    (health.data.state === "corrupted" || health.data.state === "missing")
+      ? health.data
+      : undefined;
   const branches = useQuery({
     queryKey: ["git", "branches", checkout?.id],
     queryFn: () => api("GitBranches", checkout!.id),
@@ -682,6 +695,15 @@ export default function Desktop() {
         },
       },
       {
+        label: "用命令行打开",
+        nativeAction: "repository.open-terminal",
+        disabled: !checkout,
+        action: () => {
+          if (checkout)
+            void execute(() => api("OpenCheckout", checkout.id, "terminal"));
+        },
+      },
+      {
         label: "在 GitHub 中查看",
         nativeAction: "repository.open-github",
         disabled: !(checkout && githubPath) && !selected?.repository,
@@ -760,6 +782,7 @@ export default function Desktop() {
     "view.theme.dark": <Moon size={14} />,
     "repository.open-vscode": <Code2 size={14} />,
     "repository.open-folder": <FolderOpen size={14} />,
+    "repository.open-terminal": <Terminal size={14} />,
     "repository.open-github": <Github size={14} />,
     "repository.share": <Share2 size={14} />,
     "repository.settings": <Settings2 size={14} />,
@@ -1302,6 +1325,39 @@ export default function Desktop() {
             >
               重新检测 Git 仓库
             </button>
+          </div>
+        </main>
+      ) : checkout && damagedCheckout ? (
+        <main className="desktop-plain-directory desktop-damaged-checkout">
+          <AlertTriangle size={36} />
+          <h1>
+            {damagedCheckout.state === "missing"
+              ? "本地目录不可用"
+              : "仓库元数据可能已损坏"}
+            <small>无法读取此仓库的 Git 状态</small>
+          </h1>
+          <p>{damagedCheckout.message}</p>
+          <p className="path-text">{checkout.path}</p>
+          <p className="desktop-damaged-note" role="alert">
+            移出管理只会清理 Repo Berth
+            中的目录记录、账号绑定和分组关联，不会删除磁盘上的目录、文件或 Git
+            历史。修复后可以重新导入。
+          </p>
+          <div className="form-actions">
+            <button className="danger" onClick={() => show("forget")}>
+              <Trash2 size={14} />
+              移出损坏的仓库…
+            </button>
+            <button
+              onClick={() => {
+                void status.refetch();
+                void health.refetch();
+              }}
+            >
+              <RefreshCw size={14} />
+              重新检测
+            </button>
+            <button onClick={() => show("repository")}>仓库设置</button>
           </div>
         </main>
       ) : checkout ? (

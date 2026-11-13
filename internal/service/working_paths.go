@@ -250,11 +250,17 @@ func (s *Service) OpenWorkingPath(id, path, kind string) error {
 	s.mu.Lock()
 	d := s.desktop
 	editor := s.state.Settings.EditorPath
+	terminal := s.state.Settings.TerminalPath
 	s.mu.Unlock()
 	if d == nil {
 		return model.Err("DESKTOP_REQUIRED", "桌面应用应负责打开路径")
 	}
-	if err := d.OpenPath(full, kind, editor); err != nil {
+	if kind == "terminal" {
+		err = d.OpenTerminal(full, terminal)
+	} else {
+		err = d.OpenPath(full, kind, editor)
+	}
+	if err != nil {
 		return model.Err("OPEN_FAILED", "无法打开外部工具，请检查设置和安装路径")
 	}
 	return nil

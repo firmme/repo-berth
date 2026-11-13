@@ -16,6 +16,7 @@ import (
 	"repo-berth/internal/service"
 	"repo-berth/internal/vault"
 	"runtime"
+	"strings"
 )
 
 //go:embed all:frontend/dist
@@ -30,6 +31,85 @@ func (d desktop) OpenURL(url string) error { return d.app.Browser.OpenURL(url) }
 func (d desktop) PickDirectory() (string, error) {
 	return d.app.Dialog.OpenFile().CanChooseFiles(false).CanChooseDirectories(true).CanCreateDirectories(true).SetTitle("选择仓库目录").PromptForSingleSelection()
 }
+
+// OpenTerminal launches the configured command-line program in path. An empty
+// choice keeps the platform default, matching the behaviour before terminal
+// programs became configurable.
+func (d desktop) OpenTerminal(path, terminal string) error {
+	launch := terminalLaunchFor(runtime.GOOS, path, terminal)
+	cmd := exec.Command(launch.program, launch.args...)
+	cmd.Dir = launch.dir
+	return startExternal(cmd)
+}
+
+type terminalLaunch struct {
+	program string
+	args    []string
+	dir     string
+}
+
+func terminalLaunchFor(goos, path, terminal string) terminalLaunch {
+	terminal = strings.Trim(strings.TrimSpace(terminal), `"`)
+	switch goos {
+	case "windows":
+		if terminal == "" {
+			return terminalLaunch{"powershell.exe", []string{"-NoLogo", "-NoExit"}, path}
+		}
+		switch programName(terminal) {
+		case "wt", "wt.exe":
+			return terminalLaunch{terminal, []string{"-d", path}, path}
+		case "powershell", "powershell.exe", "pwsh", "pwsh.exe":
+			return terminalLaunch{terminal, []string{"-NoLogo", "-NoExit"}, path}
+		case "cmd", "cmd.exe":
+			return terminalLaunch{terminal, nil, path}
+		default:
+			return terminalLaunch{terminal, nil, path}
+		}
+	case "darwin":
+		if terminal == "" {
+			return terminalLaunch{"open", []string{"-a", "Terminal", path}, path}
+		}
+		lower := strings.ToLower(terminal)
+		if strings.HasSuffix(lower, ".app") || strings.Contains(lower, ".app/") {
+			return terminalLaunch{"open", []string{"-a", terminal, path}, path}
+		}
+		switch programName(terminal) {
+		case "terminal", "iterm", "iterm2":
+			return terminalLaunch{"open", []string{"-a", terminal, path}, path}
+		default:
+			return terminalLaunch{terminal, nil, path}
+		}
+	default:
+		if terminal == "" {
+			return terminalLaunch{"x-terminal-emulator", nil, path}
+		}
+		switch programName(terminal) {
+		case "gnome-terminal", "kgx", "xfce4-terminal", "terminator":
+			return terminalLaunch{terminal, []string{"--working-directory=" + path}, path}
+		case "konsole":
+			return terminalLaunch{terminal, []string{"--workdir", path}, path}
+		case "alacritty":
+			return terminalLaunch{terminal, []string{"--working-directory", path}, path}
+		case "kitty":
+			return terminalLaunch{terminal, []string{"--directory", path}, path}
+		case "wezterm":
+			return terminalLaunch{terminal, []string{"start", "--cwd", path}, path}
+		default:
+			return terminalLaunch{terminal, nil, path}
+		}
+	}
+}
+
+// programName extracts a case-insensitive executable name from either Windows
+// or Unix style paths without depending on the host platform.
+func programName(program string) string {
+	program = strings.TrimSpace(program)
+	if index := strings.LastIndexAny(program, `/\`); index >= 0 {
+		program = program[index+1:]
+	}
+	return strings.ToLower(program)
+}
+
 func (d desktop) OpenPath(path, kind, editor string) error {
 	if kind == "folder" || kind == "default" {
 		return d.app.Browser.OpenFile(path)

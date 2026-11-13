@@ -137,6 +137,7 @@ type Settings struct {
 	GitPath            string `json:"gitPath"`
 	CloneDirectory     string `json:"cloneDirectory"`
 	EditorPath         string `json:"editorPath"`
+	TerminalPath       string `json:"terminalPath"`
 	AutoUpdateDisabled bool   `json:"autoUpdateDisabled"`
 }
 type State struct {

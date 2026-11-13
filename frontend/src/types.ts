@@ -91,7 +91,20 @@ export interface Settings {
   gitPath: string;
   cloneDirectory: string;
   editorPath: string;
+  terminalPath: string;
   autoUpdateDisabled: boolean;
+}
+export interface CheckoutHealth {
+  state:
+    | "ok"
+    | "plain_directory"
+    | "missing"
+    | "corrupted"
+    | "unreadable"
+    | "ownership"
+    | "git_unavailable"
+    | "configuration";
+  message: string;
 }
 export interface State {
   githubAuthConfigured?: boolean;
@@ -256,6 +269,7 @@ export const emptyState: State = {
     gitPath: "git",
     cloneDirectory: "",
     editorPath: "",
+    terminalPath: "",
     autoUpdateDisabled: false,
   },
 };

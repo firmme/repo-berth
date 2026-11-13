@@ -495,11 +495,41 @@ function ProfileModal({
     </Modal>
   );
 }
+type TerminalChoice = { value: string; label: string };
+
+function terminalChoices(): TerminalChoice[] {
+  const ua = navigator.userAgent;
+  if (/Windows/i.test(ua))
+    return [
+      { value: "powershell.exe", label: "Windows PowerShell" },
+      { value: "pwsh.exe", label: "PowerShell 7" },
+      { value: "wt.exe", label: "Windows Terminal" },
+      { value: "cmd.exe", label: "命令提示符" },
+    ];
+  if (/Macintosh|Mac OS X/i.test(ua))
+    return [
+      { value: "Terminal", label: "终端.app" },
+      { value: "iTerm", label: "iTerm" },
+    ];
+  return [
+    { value: "x-terminal-emulator", label: "系统默认终端" },
+    { value: "gnome-terminal", label: "GNOME Terminal" },
+    { value: "kgx", label: "GNOME Console" },
+    { value: "konsole", label: "Konsole" },
+    { value: "xfce4-terminal", label: "Xfce Terminal" },
+  ];
+}
+
 export function SettingsView({ st, execute }: { st: State; execute: Execute }) {
   const [settings, setSettings] = useState(st.settings);
   const [saved, setSaved] = useState(false);
   const [version, setVersion] = useState("");
   const [versionError, setVersionError] = useState("");
+  const choices = terminalChoices();
+  const [customTerminal, setCustomTerminal] = useState(
+    !!settings.terminalPath &&
+      !choices.some((choice) => choice.value === settings.terminalPath),
+  );
   return (
     <div className="page-content settings-page">
       <div className="page-heading inset-heading">
@@ -574,7 +604,7 @@ export function SettingsView({ st, execute }: { st: State; execute: Execute }) {
         </section>
         <section className="settings-row">
           <div>
-            <h2><FolderOpen size={16} /> 仓库与编辑器</h2>
+            <h2><FolderOpen size={16} /> 仓库与外部工具</h2>
           </div>
           <div className="settings-panel">
             <DirectoryField
@@ -597,6 +627,41 @@ export function SettingsView({ st, execute }: { st: State; execute: Execute }) {
                 placeholder="code"
               />
             </Field>
+            <Field
+              label="默认命令行程序"
+              hint="“仓库 → 用命令行打开”时使用；自动时 Windows 用 PowerShell、macOS 用终端.app"
+            >
+              <select
+                value={customTerminal ? "__custom" : settings.terminalPath}
+                onChange={(e) => {
+                  if (e.target.value === "__custom") {
+                    setCustomTerminal(true);
+                    return;
+                  }
+                  setCustomTerminal(false);
+                  setSettings({ ...settings, terminalPath: e.target.value });
+                }}
+              >
+                <option value="">自动（按平台）</option>
+                {choices.map((choice) => (
+                  <option key={choice.value} value={choice.value}>
+                    {choice.label}
+                  </option>
+                ))}
+                <option value="__custom">自定义命令…</option>
+              </select>
+            </Field>
+            {customTerminal && (
+              <Field label="命令行程序路径" hint="可填写完整路径或命令名">
+                <input
+                  value={settings.terminalPath}
+                  onChange={(e) =>
+                    setSettings({ ...settings, terminalPath: e.target.value })
+                  }
+                  placeholder={choices[0]?.value || "终端可执行文件"}
+                />
+              </Field>
+            )}
           </div>
         </section>
         <section className="settings-row">

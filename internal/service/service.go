@@ -21,6 +21,7 @@ type Desktop interface {
 	OpenURL(string) error
 	PickDirectory() (string, error)
 	OpenPath(string, string, string) error
+	OpenTerminal(string, string) error
 }
 type Service struct {
 	mu                    sync.Mutex
@@ -429,6 +430,7 @@ func (s *Service) SaveSettings(settings model.Settings) error {
 		return err
 	}
 	settings.ClientID = strings.TrimSpace(settings.ClientID)
+	settings.TerminalPath = strings.TrimSpace(settings.TerminalPath)
 	if settings.GitPath == "" {
 		settings.GitPath = "git"
 	}
@@ -463,6 +465,7 @@ func (s *Service) OpenCheckout(id, kind string) error {
 	s.mu.Lock()
 	d := s.desktop
 	editor := s.state.Settings.EditorPath
+	terminal := s.state.Settings.TerminalPath
 	s.mu.Unlock()
 	if d == nil {
 		return model.Err("DESKTOP_REQUIRED", "请在桌面应用中打开目录")
@@ -470,7 +473,12 @@ func (s *Service) OpenCheckout(id, kind string) error {
 	if kind != "folder" && kind != "terminal" && kind != "editor" && kind != "vscode" {
 		return model.Err("INVALID_OPERATION", "不支持的打开方式")
 	}
-	if err = d.OpenPath(c.Path, kind, editor); err != nil {
+	if kind == "terminal" {
+		err = d.OpenTerminal(c.Path, terminal)
+	} else {
+		err = d.OpenPath(c.Path, kind, editor)
+	}
+	if err != nil {
 		return model.Err("OPEN_FAILED", "无法打开外部工具，请检查设置和安装路径")
 	}
 	return s.change(func(st *model.State) error {
