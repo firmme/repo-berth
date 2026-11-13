@@ -681,9 +681,16 @@
   border-radius: 0;
   gap: 6px;
   font-size: 12px;
+  /* The popover hangs over the dark workbench toolbar. Keep every tree row
+     on the popover surface so its text never becomes dark-on-dark. */
+  background: var(--row);
+}
+.branch-choices .branch-folder,
+.branch-choices .branch-leaf {
+  color: var(--text);
 }
 .branch-choices .branch-folder {
-  color: var(--secondary-text);
+  font-weight: 500;
 }
 .branch-choices .branch-folder:hover,
 .branch-choices .branch-leaf:hover:not(:disabled) {

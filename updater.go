@@ -64,6 +64,13 @@ const updaterWindowCSS = `
 }
 `
 
+// The updater opens a separate top-level window. Keep it above the main window
+// and present it as a modal so a stray click on the workbench cannot hide the
+// update prompt.
+func builtinUpdateWindowOptions() updater.WindowOptions {
+	return updater.WindowOptions{Title: "检查更新", AlwaysOnTop: true}
+}
+
 // configureUpdater wires GitHub Releases-based self-updates. It returns false
 // for development builds, where no release version was injected.
 func configureUpdater(app *application.App) bool {
@@ -89,7 +96,7 @@ func configureUpdater(app *application.App) bool {
 		CurrentVersion: version,
 		Providers:      []updater.Provider{provider},
 		Window: &updater.BuiltinWindow{
-			Options: updater.WindowOptions{Title: "检查更新"},
+			Options: builtinUpdateWindowOptions(),
 			CSS:     updaterWindowCSS,
 		},
 	}); err != nil {
@@ -97,6 +104,27 @@ func configureUpdater(app *application.App) bool {
 		return false
 	}
 	return true
+}
+
+// attachUpdateWindowPresentation makes the framework-owned update window behave
+// like a modal prompt. The updater creates that window itself, so identify it
+// as the only non-main window when a check starts, then raise it and attach it
+// to the workbench (Windows/macOS; Linux keeps the always-on-top assertion).
+func attachUpdateWindowPresentation(app *application.App, mainWindow *application.WebviewWindow) {
+	app.Event.On(updater.EventCheckStarted, func(*application.CustomEvent) {
+		if mainWindow == nil {
+			return
+		}
+		for _, window := range app.Window.GetAll() {
+			if window.ID() == mainWindow.ID() {
+				continue
+			}
+			window.SetAlwaysOnTop(true)
+			mainWindow.AttachModal(window)
+			window.Focus()
+			return
+		}
+	})
 }
 
 // attachAutoUpdateTrigger checks for a new application release after startup.

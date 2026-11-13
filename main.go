@@ -224,6 +224,7 @@ func main() {
 	service.Attach(svc, desktop{app}, func(name string, data any) { app.Event.Emit(name, data) })
 	mainWindow = app.Window.NewWithOptions(application.WebviewWindowOptions{Title: "Repo Berth · 仓库工作台", Width: 1440, Height: 920, MinWidth: 900, MinHeight: 640, Frameless: runtime.GOOS == "windows", URL: "/"})
 	if updaterReady {
+		attachUpdateWindowPresentation(app, mainWindow)
 		service.AttachUpdater(svc, func() { startUpdateCheck(app) })
 		attachAutoUpdateTrigger(app, svc.AutoUpdateEnabled)
 	}

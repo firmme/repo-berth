@@ -7,6 +7,16 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/updater/providers/github"
 )
 
+func TestUpdateWindowStaysAboveTheWorkbench(t *testing.T) {
+	options := builtinUpdateWindowOptions()
+	if !options.AlwaysOnTop {
+		t.Fatal("update window is not always on top")
+	}
+	if options.Title == "" {
+		t.Fatal("update window has no title")
+	}
+}
+
 func TestUpdateAssetMatcherSelectsDedicatedUpdateArchives(t *testing.T) {
 	assets := []github.ReleaseAsset{
 		{Name: "RepoBerth-0.2.8-windows-amd64.zip"},
