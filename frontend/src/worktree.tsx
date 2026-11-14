@@ -376,6 +376,8 @@ export function Worktree({
     try {
       await api("SaveWorkingFile", c.id, editing, editorText);
       setEditorOriginal(editorText);
+      await client.invalidateQueries({ queryKey: ["state"] });
+      await client.invalidateQueries({ queryKey: ["git", "file-info", c.id] });
       await client.invalidateQueries({ queryKey: ["git", "status", c.id] });
       await client.invalidateQueries({ queryKey: ["git", "diff", c.id] });
     } catch (e) {

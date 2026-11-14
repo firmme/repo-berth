@@ -723,7 +723,6 @@ function CredentialCleanupNotice({
           onClick={() =>
             void execute(async () => {
               await api("RetryCredentialCleanup");
-              useUI.getState().set({ tasksOpen: true });
             })
           }
         >

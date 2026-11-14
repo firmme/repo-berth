@@ -7,6 +7,10 @@ beforeEach(() =>
     commitDrafts: {},
     commitSubmissions: {},
     unreadTaskIds: [],
+    localTasks: [],
+    tasksOpen: false,
+    toastTaskId: "",
+    toastRevision: 0,
   }),
 );
 const outcome = (state: string): Task => ({
@@ -59,4 +63,15 @@ it("counts each task once and clears every unread notification together", () => 
   expect(useUI.getState().unreadTaskIds).toEqual(["first", "second", "third"]);
   useUI.getState().markAllTasksRead();
   expect(useUI.getState().unreadTaskIds).toEqual([]);
+});
+it("keeps only the latest toast without opening or losing task notifications", () => {
+  const ui = useUI.getState();
+  ui.notifyTask({ ...outcome("succeeded"), id: "first" }, true);
+  ui.notifyTask({ ...outcome("failed"), id: "second" }, true);
+  expect(useUI.getState().tasksOpen).toBe(false);
+  expect(useUI.getState().toastTaskId).toBe("second");
+  ui.dismissToast();
+  expect(useUI.getState().toastTaskId).toBe("");
+  expect(useUI.getState().localTasks.map((t) => t.id)).toEqual(["second", "first"]);
+  expect(useUI.getState().unreadTaskIds).toEqual(["first", "second"]);
 });

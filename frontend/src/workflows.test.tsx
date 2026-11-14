@@ -131,6 +131,9 @@ beforeEach(() => {
     selected: "",
     query: "",
     tasksOpen: false,
+    localTasks: [],
+    toastTaskId: "",
+    toastRevision: 0,
     menuOpen: false,
     unreadTaskIds: [],
     commitDrafts: {},
@@ -1282,6 +1285,8 @@ describe("task center notifications", () => {
     const badge = unread.querySelector(".task-badge") as HTMLElement;
     expect(badge.textContent).toBe("1");
     expect(badge.className).toBe("task-badge");
+    expect(screen.queryByRole("complementary", { name: "任务中心" })).toBeNull();
+    expect(screen.getByRole("status", { name: "新消息通知" })).toBeTruthy();
 
     state.tasks[0] = {
       ...state.tasks[0],
@@ -1296,11 +1301,14 @@ describe("task center notifications", () => {
     expect(
       (failed.querySelector(".task-badge") as HTMLElement).className,
     ).toContain("failed");
+    expect(screen.queryByRole("complementary", { name: "任务中心" })).toBeNull();
+    expect(screen.getByRole("status", { name: "新消息通知" }).textContent).toContain("授权失效");
 
     await user.click(failed);
     const drawer = await screen.findByRole("complementary", {
       name: "任务中心",
     });
+    expect(screen.queryByRole("status", { name: "新消息通知" })).toBeNull();
     expect(within(drawer).getByText("Push")).toBeTruthy();
     expect(within(drawer).getByText("Fetch")).toBeTruthy();
     expect(within(drawer).getAllByLabelText("未读")).toHaveLength(1);

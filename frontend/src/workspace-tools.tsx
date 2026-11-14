@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { AlertTriangle, Check, Info, X } from "lucide-react";
 import { api, errorMessage } from "./api";
-import { useUI } from "./ui";
 import { Modal, Field, DirectoryField } from "./components";
 import type { State, Task } from "./types";
 import type { Execute } from "./catalog";
@@ -15,6 +15,8 @@ const taskNames: Record<string, string> = {
   commit: "提交",
   branch: "切换分支",
   credential_cleanup: "清理旧凭据",
+  line_endings: "换行符已调整",
+  notice: "操作提示",
 };
 const stateNames: Record<string, string> = {
   queued: "等待执行",
@@ -78,7 +80,7 @@ export function ImportModal({
                 next.checkouts.find((c) => c.id === id)?.repositoryId || id,
                 id,
               );
-            } else useUI.getState().set({ tasksOpen: true });
+            }
             onClose();
           });
         }}
@@ -219,7 +221,7 @@ export function TaskRow({
           目标目录：{t.cloneRequest.destination}
         </p>
       )}
-      {t.progress && <small>{t.progress}</small>}
+      {t.progress && <small className="task-progress">{t.progress}</small>}
       {t.error && (
         <p className="task-error">
           {t.errorCode} · {t.error}
@@ -312,4 +314,47 @@ export function TaskRow({
       </div>
     </article>
   );
+}
+
+export const TASK_TOAST_TIMEOUT = 5000;
+
+export function TaskToast({ task, st, revision, onDismiss, onOpen }: {
+  task: Task;
+  st: State;
+  revision: number;
+  onDismiss: () => void;
+  onOpen: () => void;
+}) {
+  const [hovered, setHovered] = useState(false);
+  const [focused, setFocused] = useState(false);
+  useEffect(() => {
+    if (hovered || focused) return;
+    const timer = window.setTimeout(onDismiss, TASK_TOAST_TIMEOUT);
+    return () => window.clearTimeout(timer);
+  }, [revision, hovered, focused, onDismiss]);
+  const failed = task.state === "failed" || task.state === "interrupted";
+  const Icon = failed ? AlertTriangle : task.state === "succeeded" ? Check : Info;
+  const target = st.checkouts.find((c) => c.id === task.target)?.name ||
+    st.repositories.find((r) => r.id === task.target)?.name ||
+    st.accounts.find((a) => a.id === task.target)?.login || "";
+  return <section
+    className={`task-toast${failed ? " failed" : ""}`}
+    aria-label="新消息通知"
+    role="status"
+    onMouseEnter={() => setHovered(true)}
+    onMouseLeave={() => setHovered(false)}
+    onFocusCapture={() => setFocused(true)}
+    onBlurCapture={(event) => {
+      if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setFocused(false);
+    }}
+  >
+    <Icon size={17} className="task-toast-icon" aria-hidden="true" />
+    <div className="task-toast-content">
+      <strong>{taskNames[task.kind] || task.kind}{task.kind !== "line_endings" && ` · ${stateNames[task.state] || task.state}`}</strong>
+      {target && <span className="task-toast-target">{target}</span>}
+      <p>{task.error || task.progress || "任务进度已更新，可在任务中心查看。"}</p>
+      <button onClick={onOpen}>查看任务中心</button>
+    </div>
+    <button className="task-toast-close" aria-label="收起消息通知" onClick={onDismiss}><X size={15} /></button>
+  </section>;
 }

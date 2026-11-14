@@ -158,6 +158,9 @@ func quoteShell(s string) string {
 }
 func (r Runner) Run(ctx context.Context, dir string, auth *Auth, config []string, args ...string) (string, error) {
 	base := []string{"-c", "core.quotepath=false", "-c", "color.ui=false", "-c", "credential.helper=", "-c", "http.followRedirects=false", "-c", "protocol.file.allow=never", "-c", "protocol.ext.allow=never", "-c", "core.fsmonitor=false"}
+	for _, setting := range r.lineEndingConfig(ctx, dir) {
+		base = append(base, "-c", setting)
+	}
 	env := CleanEnv()
 	for _, path := range r.TrustedDirectories {
 		base = append(base, "-c", "safe.directory="+filepath.ToSlash(path))
@@ -413,10 +416,11 @@ func (r Runner) Status(ctx context.Context, path string) (Status, error) {
 		return s, err
 	}
 	s.Files = ParseStatus(out)
-	if raw, err := r.Run(ctx, path, nil, nil, "diff", "--numstat", "-z", "-M"); err == nil {
+	if raw, ignored, err := r.lineEndingDiff(ctx, path, false); err == nil {
 		applyNumstat(s.Files, raw, false)
+		s.Files = hideLineEndingChanges(s.Files, ignored, false)
 	}
-	if raw, err := r.Run(ctx, path, nil, nil, "diff", "--cached", "--numstat", "-z", "-M"); err == nil {
+	if raw, _, err := r.lineEndingDiff(ctx, path, true); err == nil {
 		applyNumstat(s.Files, raw, true)
 	}
 	branch, err := r.Run(ctx, path, nil, nil, "symbolic-ref", "--short", "-q", "HEAD")
@@ -517,6 +521,16 @@ func (r Runner) Diff(ctx context.Context, path, file string, staged bool) (strin
 		args = append(args, "--cached")
 	}
 	args = append(args, "--", file)
+	out, err := r.Run(ctx, path, nil, nil, args...)
+	if err != nil || out != "" {
+		return out, err
+	}
+	_, ignored, err := r.lineEndingDiff(ctx, path, staged)
+	if err != nil || ignored[file] {
+		return "", err
+	}
+	// Git can also suppress a final-newline change with --ignore-cr-at-eol.
+	args = append(args[:5], args[6:]...)
 	return r.Run(ctx, path, nil, nil, args...)
 }
 func (r Runner) CommitDiff(ctx context.Context, path, hash string) (string, error) {
@@ -644,7 +658,12 @@ func (r Runner) StageMany(ctx context.Context, path string, files []string, stag
 		return nil
 	}
 	if stage {
-		_, err := r.Run(ctx, path, nil, nil, append([]string{"add", "--"}, paths...)...)
+		var err error
+		paths, err = r.contentStagePaths(ctx, path, paths)
+		if err != nil || len(paths) == 0 {
+			return err
+		}
+		_, err = r.Run(ctx, path, nil, nil, append([]string{"add", "--"}, paths...)...)
 		return err
 	}
 	raw, err := r.Run(ctx, path, nil, nil, "status", "--porcelain=v1", "-z")

@@ -117,7 +117,7 @@ import { AccountsView, SettingsView } from "./settings";
 import { Worktree } from "./worktree";
 import { NoticesView } from "./notices";
 import { BindingModal, CloneForm, CloneURLForm, ShareForm } from "./repository";
-import { ImportModal, TaskRow } from "./workspace-tools";
+import { ImportModal, TaskRow, TaskToast } from "./workspace-tools";
 import {
   CheckoutIdentity,
   LocalManagement,
@@ -203,7 +203,7 @@ export default function Desktop() {
     );
   const [lastFetched, setLastFetched] = useState<Record<string, string>>({});
   const seenTasks = useRef<Set<string> | null>(null);
-  const notifiedTasks = useRef<Set<string> | null>(null);
+  const notifiedTasks = useRef<Map<string, string> | null>(null);
   const nativeCommands = useRef<Record<string, () => void>>({});
   const {
     data: st = emptyState,
@@ -364,10 +364,12 @@ export default function Desktop() {
   useEffect(() => {
     setRemoteCheck(undefined);
   }, [lastFetch]);
-  const activeTasks = st.tasks.filter((t) =>
+  const tasks = [...ui.localTasks, ...st.tasks].sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+  const toastTask = tasks.find((t) => t.id === ui.toastTaskId);
+  const activeTasks = tasks.filter((t) =>
     ["queued", "running"].includes(t.state),
   );
-  const unreadTasks = st.tasks.filter((t) => ui.unreadTaskIds.includes(t.id));
+  const unreadTasks = tasks.filter((t) => ui.unreadTaskIds.includes(t.id));
   const unreadCount = unreadTasks.length;
   const unreadFailed = unreadTasks.some((t) => t.state === "failed");
   const tasksLabel = [
@@ -456,7 +458,6 @@ export default function Desktop() {
       )
         continue;
       seenTasks.current.add(t.id);
-      if (t.state === "failed") setError(`${t.errorCode} · ${t.error}`);
       if (t.state === "succeeded" && t.kind === "fetch")
         setLastFetched((values) => ({ ...values, [t.target]: t.finishedAt }));
     }
@@ -464,16 +465,31 @@ export default function Desktop() {
   useEffect(() => {
     if (!notifiedTasks.current) {
       if (!loading)
-        notifiedTasks.current = new Set(st.tasks.map((t) => t.id));
+        notifiedTasks.current = new Map(st.tasks.map((t) => [t.id, t.state]));
       return;
     }
-    const fresh = st.tasks
-      .filter((t) => !notifiedTasks.current!.has(t.id))
-      .map((t) => t.id);
-    if (!fresh.length) return;
-    for (const id of fresh) notifiedTasks.current.add(id);
-    useUI.getState().markTasksUnread(fresh);
+    for (const task of [...st.tasks].reverse()) {
+      const previous = notifiedTasks.current.get(task.id);
+      const completed = !["queued", "running"].includes(task.state);
+      if (previous === undefined || (completed && previous !== task.state)) {
+        useUI.getState().notifyTask(task);
+      }
+      notifiedTasks.current.set(task.id, task.state);
+    }
   }, [st.tasks, loading]);
+  useEffect(() => {
+    if (!error) return;
+    const now = new Date().toISOString();
+    useUI.getState().notifyTask({
+      id: crypto.randomUUID(), kind: "notice", target: checkout?.id || "",
+      state: "failed", progress: "", errorCode: "", error,
+      startedAt: now, finishedAt: now,
+    }, true);
+    setError("");
+  }, [error, checkout?.id]);
+  useEffect(() => {
+    if (ui.tasksOpen) ui.dismissToast();
+  }, [ui.tasksOpen, ui.dismissToast]);
   useEffect(() => {
     if (ui.view === "accounts") setPanel("accounts");
     if (ui.view === "settings") setPanel("settings");
@@ -1264,22 +1280,11 @@ export default function Desktop() {
           </footer>
         </div>
       )}
-      {error && (
-        <div className="desktop-error" role="alert">
-          <span>{error}</span>
-          <button
-            onClick={() => {
-              ui.set({ tasksOpen: true });
-              setError("");
-            }}
-          >
-            查看任务
-          </button>
-          <button aria-label="关闭错误提示" onClick={() => setError("")}>
-            <X size={15} />
-          </button>
-        </div>
-      )}
+      {toastTask && !ui.tasksOpen && <TaskToast
+        task={toastTask} st={st} revision={ui.toastRevision}
+        onDismiss={ui.dismissToast}
+        onOpen={() => ui.set({ tasksOpen: true })}
+      />}
       {isError ? (
         <div className="desktop-fatal">
           <ErrorNotice message="无法读取本地数据" />
@@ -1468,7 +1473,7 @@ export default function Desktop() {
             <div className="desktop-tasks-title">
               <h2>任务进度</h2>
               <span className="desktop-tasks-count">
-                共 {st.tasks.length} 项
+                共 {tasks.length} 项
                 {unreadCount > 0 ? ` · ${unreadCount} 条未读` : ""}
               </span>
             </div>
@@ -1492,8 +1497,8 @@ export default function Desktop() {
             </div>
           </header>
           <div className="task-list">
-            {st.tasks.length ? (
-              st.tasks.map((t) => (
+            {tasks.length ? (
+              tasks.map((t) => (
                 <TaskRow
                   key={t.id}
                   task={t}
@@ -1570,7 +1575,6 @@ export default function Desktop() {
             }
             onDone={() => {
               closePanel();
-              ui.set({ tasksOpen: true });
             }}
           />
         </Modal>
@@ -1581,7 +1585,7 @@ export default function Desktop() {
             key={cloneRequest?.destination || "new"}
             st={st} execute={execute} initial={cloneRequest}
             preferredAccountID={ui.scope.startsWith("account:") ? ui.scope.slice(8) : account?.id}
-            onDone={() => { closePanel(); ui.set({ tasksOpen: true }); }}
+            onDone={closePanel}
           />
         </Modal>
       )}
@@ -1690,7 +1694,6 @@ export default function Desktop() {
             execute={execute}
             onDone={() => {
               closePanel();
-              ui.set({ tasksOpen: true });
             }}
           />
         </Modal>

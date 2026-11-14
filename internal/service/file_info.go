@@ -303,8 +303,14 @@ func (s *Service) SetWorkingFileFormat(id, file, encoding, lineEnding string) er
 	if err != nil {
 		return model.Err("WRITE_FAILED", "无法转换文件格式")
 	}
+	if bytes.Equal(raw, payload) {
+		return nil
+	}
 	if err := os.WriteFile(full, payload, 0o644); err != nil {
 		return model.Err("WRITE_FAILED", "无法保存文件，请检查权限")
+	}
+	if previous := detectLineEnding(text); previous != lineEnding && previous != "None" {
+		return s.recordLineEndingNotice(c.ID, []string{file + "：" + previous + " → " + lineEnding + "（切换文件格式）"})
 	}
 	return nil
 }

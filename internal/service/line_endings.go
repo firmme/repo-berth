@@ -110,10 +110,21 @@ func (s *Service) CheckLineEndingRisks(id string, files []string) ([]LineEndingR
 		if len(data) > 20<<20 || bytes.IndexByte(data, 0) >= 0 || !utf8.Valid(data) {
 			continue
 		}
+		// Commit checks concern the index. The editor may retain CRLF or mixed
+		// separators after staging has already normalized its snapshot to LF.
+		staged := false
+		if indexed, err := s.runner().Run(ctx, c.Path, nil, nil, "show", ":"+file); err == nil {
+			data = []byte(indexed)
+			staged = true
+		}
 		crlf, lf := countLineEndings(data)
 		policy := info.eol
 		if policy == "unspecified" || policy == "set" {
 			policy = ""
+		}
+		if staged {
+			// eol=crlf describes checkout bytes; text in the index is LF.
+			policy = "lf"
 		}
 		risk := LineEndingRisk{Path: file, CRLF: crlf, LF: lf, Mixed: crlf > 0 && lf > 0, Policy: policy}
 		if risk.Mixed || (policy == "lf" && crlf > 0) || (policy == "crlf" && lf > 0) {
@@ -159,6 +170,7 @@ func (s *Service) FixLineEndings(id string, files []string) error {
 			return model.Err("UNSTAGED_CHANGES", "文件还有未暂存修改，请先处理这些改动，或选择原样提交")
 		}
 	}
+	changes := []string{}
 	for _, file := range files {
 		info := attrs[file]
 		if info.text == "unset" {
@@ -180,11 +192,18 @@ func (s *Service) FixLineEndings(id string, files []string) error {
 		if info.eol == "crlf" {
 			text = strings.ReplaceAll(text, "\n", "\r\n")
 		}
+		if text == string(data) {
+			continue
+		}
 		if err := os.WriteFile(full, []byte(text), 0o644); err != nil {
 			return model.Err("WRITE_FAILED", "无法保存文件，请检查权限")
 		}
+		changes = append(changes, file+"："+detectLineEnding(string(data))+" → "+detectLineEnding(text)+"（按 Git 规则修复）")
 	}
 	args := append([]string{"add", "--renormalize", "--"}, files...)
 	_, err = s.runner().Run(s.ctx, c.Path, nil, nil, args...)
-	return err
+	if err != nil {
+		return err
+	}
+	return s.recordLineEndingNotice(c.ID, changes)
 }

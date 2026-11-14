@@ -320,7 +320,7 @@ try {
   assert(await evaluate(`!!document.querySelector('.desktop-window-controls')`), "Windows titlebar controls missing");
   await textButton("设置…");
   await until(`!!document.querySelector('dialog[open] .settings-page')`);
-  assert(await evaluate(`document.querySelector('.settings-page').getBoundingClientRect().height < 500`), "Settings form is too tall");
+  assert(await evaluate(`(()=>{const d=document.querySelector('dialog[open]');const r=d.getBoundingClientRect();return r.top>=16 && r.bottom<=innerHeight-16 && d.scrollWidth<=d.clientWidth+1})()`), "Settings dialog exceeds the viewport");
   await capture("desktop-settings-compact");
   await evaluate(`document.documentElement.setAttribute('data-theme','dark')`);
   await capture("desktop-settings-dark");

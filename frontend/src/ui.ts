@@ -9,6 +9,11 @@ interface UI {
   tasksOpen: boolean;
   menuOpen: boolean;
   unreadTaskIds: string[];
+  localTasks: Task[];
+  toastTaskId: string;
+  toastRevision: number;
+  notifyTask: (task: Task, local?: boolean) => void;
+  dismissToast: () => void;
   commitDrafts: Record<string, string>;
   commitSubmissions: Record<string, { taskId: string; message: string }>;
   markTasksUnread: (ids: string[]) => void;
@@ -30,6 +35,17 @@ export const useUI = create<UI>((set) => ({
   tasksOpen: false,
   menuOpen: false,
   unreadTaskIds: [],
+  localTasks: [],
+  toastTaskId: "",
+  toastRevision: 0,
+  notifyTask: (task, local = false) =>
+    set((s) => ({
+      localTasks: local ? [task, ...s.localTasks].slice(0, 200) : s.localTasks,
+      unreadTaskIds: [...new Set([...s.unreadTaskIds, task.id])],
+      toastTaskId: s.tasksOpen ? "" : task.id,
+      toastRevision: s.toastRevision + 1,
+    })),
+  dismissToast: () => set({ toastTaskId: "" }),
   commitDrafts: {},
   commitSubmissions: {},
   markTasksUnread: (ids) =>

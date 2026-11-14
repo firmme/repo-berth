@@ -82,15 +82,25 @@ func (s *Service) SaveWorkingFile(id, file, content string) error {
 		return model.Err("WRITE_FAILED", "无法访问文件，请检查权限")
 	}
 	encoding, lineEnding := "UTF-8", "LF"
+	previousEnding := "None"
 	if existing, readErr := os.ReadFile(full); readErr == nil {
 		text, detected, binaryFile := decodeText(existing)
-		if !binaryFile {
-			encoding = detected
-			lineEnding = detectLineEnding(text)
-			if lineEnding == "Mixed" || lineEnding == "None" {
-				lineEnding = "LF"
-			}
+		if binaryFile {
+			return model.Err("BINARY_FILE", "二进制文件不支持应用内编辑")
 		}
+		// Browser textareas normalize separators. Saving an untouched document
+		// must not rewrite its original CRLF or mixed line endings.
+		if normalizeLineEndings(text, "LF") == normalizeLineEndings(content, "LF") {
+			return nil
+		}
+		encoding = detected
+		lineEnding = detectLineEnding(text)
+		previousEnding = lineEnding
+		if lineEnding == "Mixed" || lineEnding == "None" {
+			lineEnding = "LF"
+		}
+	} else if !os.IsNotExist(readErr) {
+		return model.Err("READ_FAILED", "无法读取文件，请检查权限")
 	}
 	payload, err := encodeText(content, encoding, lineEnding)
 	if err != nil {
@@ -98,6 +108,12 @@ func (s *Service) SaveWorkingFile(id, file, content string) error {
 	}
 	if err := os.WriteFile(full, payload, 0o644); err != nil {
 		return model.Err("WRITE_FAILED", "无法保存文件，请检查权限")
+	}
+	if previousEnding == "None" {
+		previousEnding = detectLineEnding(content)
+	}
+	if previousEnding != lineEnding && previousEnding != "None" {
+		return s.recordLineEndingNotice(c.ID, []string{file + "：" + previousEnding + " → " + lineEnding + "（保存文件）"})
 	}
 	return nil
 }
@@ -229,6 +245,8 @@ func (s *Service) ForceTrackFile(id, file string) error {
 	if err := s.validateCheckout(c); err != nil {
 		return err
 	}
-	_, err = s.runner().Run(s.ctx, c.Path, nil, nil, "add", "-f", "--", file)
-	return err
+	return s.stageWithLineEndingNotice(c, []string{file}, func() error {
+		_, err := s.runner().Run(s.ctx, c.Path, nil, nil, "add", "-f", "--", file)
+		return err
+	})
 }
