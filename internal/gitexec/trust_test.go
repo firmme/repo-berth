@@ -18,7 +18,9 @@ func TestOwnershipUsesOnlyExplicitProtectedTrustAndKeepsIdentityIsolated(t *test
 	testGit(t, repo, "init", "-b", "main")
 	testGit(t, other, "init", "-b", "main")
 	global := filepath.Join(home, ".gitconfig")
-	before := []byte("[user]\n name = Wrong Global Author\n email = wrong@example.test\n[credential]\n helper = never-run-this-helper\n[safe]\n directory = " + filepath.ToSlash(repo) + "\n")
+	// Hosted runners may trust every directory in system configuration. Reset
+	// that inherited list so this fixture tests only its explicit trust entry.
+	before := []byte("[user]\n name = Wrong Global Author\n email = wrong@example.test\n[credential]\n helper = never-run-this-helper\n[safe]\n directory =\n directory = " + filepath.ToSlash(repo) + "\n")
 	if err := os.WriteFile(global, before, 0600); err != nil {
 		t.Fatal(err)
 	}
