@@ -480,7 +480,7 @@ try {
   const lockPath = join(personal.path, ".git", "index.lock");
   await writeFile(lockPath, "synthetic lock fixture");
   await click(".desktop-primary");
-  await textButton("任务中心");
+  await click(".desktop-tasks-toggle");
   await until(
     `Array.from(document.querySelectorAll('.task-row')).some(r=>r.querySelector('strong')?.textContent==='提交' && r.querySelector('.task-state')?.textContent==='失败')`,
   );
@@ -557,7 +557,7 @@ try {
   );
   await capture("desktop-accounts");
   await click('dialog button[aria-label="关闭"]');
-  await textButton("任务中心");
+  await click(".desktop-tasks-toggle");
   await evaluate(
     `Array.from(document.querySelectorAll('.task-row')).find(r=>r.innerText.includes('已恢复上次克隆') || r.innerText.includes('测试授权已失效')).querySelector('button:last-child').click()`,
   );
@@ -721,7 +721,7 @@ try {
     deviceScaleFactor: 1,
     mobile: false,
   });
-  await textButton("任务中心");
+  await click(".desktop-tasks-toggle");
   assert.equal(
     await evaluate(`document.body.innerText.includes('确认目录信任')`),
     false,
