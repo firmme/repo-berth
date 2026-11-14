@@ -10,11 +10,11 @@ import (
 	"unicode/utf8"
 )
 
-// Git's name-only/raw output still includes EOL-only modifications even when
-// --ignore-cr-at-eol is set. Numstat omits those files. Compare both in one
-// invocation, retaining metadata changes, binary files, symlinks and submodules.
+// Read unfiltered metadata separately: Git versions differ on whether combining
+// --raw/--numstat with --ignore-cr-at-eol retains EOL-only raw records. Filtered
+// statistics plus a byte comparison identify noise without hiding metadata.
 func (r Runner) lineEndingDiff(ctx context.Context, path string, staged bool) (string, map[string]bool, error) {
-	args := []string{"diff", "--no-ext-diff", "--no-textconv", "--no-relative", "--ignore-cr-at-eol", "--raw", "--numstat", "-z", "-M"}
+	args := []string{"diff", "--no-ext-diff", "--no-textconv", "--no-relative", "--raw", "-z", "-M"}
 	if staged {
 		args = append(args, "--cached")
 	}
@@ -22,7 +22,15 @@ func (r Runner) lineEndingDiff(ctx context.Context, path string, staged bool) (s
 	if err != nil {
 		return "", nil, err
 	}
-	parts := strings.Split(raw, "\x00")
+	statsArgs := []string{"diff", "--no-ext-diff", "--no-textconv", "--no-relative", "--ignore-cr-at-eol", "--numstat", "-z", "-M"}
+	if staged {
+		statsArgs = append(statsArgs, "--cached")
+	}
+	stats, err := r.Run(ctx, path, nil, nil, statsArgs...)
+	if err != nil {
+		return "", nil, err
+	}
+	parts := strings.Split(raw+stats, "\x00")
 	ignored := map[string]bool{}
 	i := 0
 	for i+1 < len(parts) && strings.HasPrefix(parts[i], ":") {
