@@ -51,7 +51,11 @@ func (r Runner) lineEndingDiff(ctx context.Context, path string, staged bool) (s
 			i += 2
 			file = parts[i]
 		}
-		delete(ignored, file)
+		// Older Git omits EOL-only numstat rows; newer Git emits 0/0.
+		// Both still need the byte comparison below before hiding a file.
+		if cols[0] != "0" || cols[1] != "0" {
+			delete(ignored, file)
+		}
 	}
 	// --ignore-cr-at-eol also suppresses some final-newline differences. Only
 	// hide files whose bytes actually match after CRLF -> LF conversion.
