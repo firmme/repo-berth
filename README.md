@@ -2,7 +2,7 @@
 
 基于 **Wails 3.0.0 + Go + React / TypeScript** 的多账号 Git 仓库桌面工具，目前支持 GitHub。每个本地副本可以独立绑定访问账号与提交身份，仓库 owner 不会用于推断当前登录账号。
 
-当前版本 **0.2.19**：补充组织仓库访问授权入口，已连接账号也可重新授权；SSO 导致仓库列表不完整时提示授权问题并保留已有记录。
+当前版本 **0.2.19**：新增官方 GitHub CLI 登录及已登录账号连接，按账号独立管理仓库访问凭据；同时支持 Personal Access Token 登录，替换凭据保留仓库绑定和提交身份。
 
 ## 截图
 
@@ -30,6 +30,12 @@
 - 应用内自更新。更新提示窗口置顶并以模态显示，避免被主窗口遮挡；更新器只使用 GitHub Release 中的 `*-update.zip` 资产。
 
 ## GitHub 组织仓库访问
+
+推荐在“账号与身份”点击“通过 GitHub CLI 登录”，连接已登录的指定账号，或点击“在浏览器登录另一个账号”。已有账号可点击“改用 GitHub CLI”。需要安装 [官方 GitHub CLI](https://cli.github.com/)；应用调用官方 `gh auth login`，不借用其 Client ID。GitHub CLI 与 GitHub Desktop 属于 [GitHub 特权 OAuth 应用](https://docs.github.com/en/apps/oauth-apps/using-oauth-apps/privileged-oauth-apps)，官方浏览器登录不受普通第三方 OAuth 应用审批限制，组织 SSO 等策略仍适用。若 CLI 中已有凭据来自手动 PAT，其权限仍遵循相应 Token 的组织策略。
+
+每次连接明确使用所选用户名获取凭据并验证 GitHub 账号归属，保存到 Repo Berth 的系统凭据库。后续云端同步及 Git 操作按应用中的账号绑定选择凭据，不随 CLI 当前账号变化。浏览器登录会更新 CLI 自己的当前账号；应用不运行 `gh auth setup-git`、不修改全局 Git 凭据助手配置。移除 Repo Berth 账号不会登出 CLI。
+
+在“账号与身份”点击“使用 Token 添加账号”，或在已有账号点击“改用 Token”，可以使用个人 PAT 直接访问 GitHub，不依赖组织批准 Repo Berth 这个 OAuth 应用。Classic Token 的仓库操作需要 `repo`，修改 Actions 工作流还需要 `workflow`；Fine-grained Token 需选择对应仓库，并授予 Contents 读写权限。Token 验证账号归属后独立保存到系统凭据库，也可选择仅本次会话保存。保存后点击“同步仓库”。组织仍可单独禁止 Classic Token、要求 Fine-grained Token 审批或要求 SSO，应用无法取消这些组织策略。
 
 云端同步包含当前账号有权访问的个人、协作和组织仓库。加入组织不代表组织已允许 Repo Berth 访问其私有仓库：在“账号与身份”点击“组织访问授权”，确认浏览器登录的是对应账号，在 GitHub 的 Authorized OAuth Apps 中选择本应用，为目标组织 Grant 或 Request access（申请需要组织管理员批准）。
 
@@ -96,7 +102,7 @@ npm test --prefix frontend
 
 ## 数据与安全
 
-- Token 只存在于 Go 内存和系统凭据库，不进入 React、SQLite、remote URL、命令行参数或日志。
+- OAuth Token 只存在于 Go 内存和系统凭据库。手动输入的 PAT 通过密码框送入 Go 后清空，不进入 SQLite、remote URL、命令行参数或日志；系统凭据库按账号保存，也支持仅本次会话保存。
 - 每个网络命令使用独立 loopback 凭据通道和随机 nonce。
 - Git 子进程隔离继承的 `GIT_*`、系统/全局配置和凭据助手链；只读取换行符设置白名单与显式的 `safe.directory` 信任，应用不写全局 Git 配置。
 - 应用内提交不启用 GPG / SSH 签名，不递归克隆 submodule，不自动下载 Git LFS 对象。

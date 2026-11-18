@@ -10,6 +10,7 @@ export interface Account {
   color: string;
   status: string;
   sessionOnly: boolean;
+  authentication?: "pat" | "github-cli";
   syncedAt: string;
 }
 export interface Profile {

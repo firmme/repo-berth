@@ -14,6 +14,7 @@ import (
 type authorizedIdentity struct {
 	user            provider.User
 	token           string
+	authentication  string
 	targetAccountID string
 	expiresAt       time.Time
 	resumeTaskID    string
@@ -88,6 +89,7 @@ func (s *Service) saveAuthorization(ctx context.Context, taskID string, data aut
 	}
 	colors := []string{"#1b6c80", "#945e13", "#27663f", "#9c4357", "#4e5d6c"}
 	account := model.Account{ID: model.ID(), Provider: "github", Host: "github.com", UserID: data.user.ID, Login: data.user.Login, Name: data.user.Name, Avatar: data.user.Avatar, Color: colors[len(current.Accounts)%len(colors)], Status: "connected", SessionOnly: sessionOnly}
+	account.Authentication = data.authentication
 	oldRef := ""
 	for _, old := range current.Accounts {
 		if accountIdentity(old) == identity {

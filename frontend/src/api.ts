@@ -45,6 +45,9 @@ interface Methods {
     reauthorizeID: string,
   ) => Authorization;
   AccountEmails: (id: string) => Email[];
+  ConnectToken: (token: string, sessionOnly: boolean, replaceID: string) => string;
+  GitHubCLIAccounts: () => { login: string; active: boolean; state: string }[];
+  ConnectGitHubCLI: (login: string, replaceID: string, browserLogin: boolean) => string;
   RecoverAuthorization: (taskID: string, sessionOnly: boolean) => string;
   RetryCredentialCleanup: () => string;
   OpenGitHubPage: (kind: string) => void;

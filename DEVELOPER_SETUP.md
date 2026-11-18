@@ -9,6 +9,8 @@
 
 不应借用 GitHub CLI 或其他产品的 Client ID。应用名称、授权范围与撤销授权入口必须对应 Repo Berth 自己的应用。
 
+应用另提供“通过 GitHub CLI 登录”：调用使用者安装的官方 `gh` 程序完成浏览器登录，或通过 `gh auth token --hostname github.com --user <login>` 连接明确选中的已有账号，并向 GitHub 验证账号归属。该模式不需要本项目 OAuth Client ID，不借用官方标识，不运行 `gh auth setup-git`，不修改全局 Git 凭据助手；凭据在 Repo Berth 中按账号独立保存。GitHub CLI 本身的登录和凭据存储仍由官方 CLI 管理。
+
 当所有发布者配置缺失时，`node scripts/build.mjs --allow-unconfigured-auth` 才生成带 `-dev` 后缀的本地开发程序；这种程序没有真实登录能力，不能作为可登录成品交付。单元测试使用合成 Provider，不会证明实际 GitHub 授权已经可用。旧版本的每用户配置仅为迁移和开发测试兼容保留，不再提供普通用户编辑入口；构建内置配置优先。
 
 注册和 Device Flow 的要求见 [GitHub 官方文档](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps#device-flow)。

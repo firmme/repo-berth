@@ -239,7 +239,7 @@ func classify(s string) error {
 	case strings.Contains(lower, "refusing to allow") && strings.Contains(lower, "workflow"):
 		return model.Err("WORKFLOW_SCOPE", "GitHub 拒绝了 .github/workflows 文件；请重新授权账号并允许 workflow 权限后重试")
 	case strings.Contains(lower, "403") || strings.Contains(lower, "permission") || strings.Contains(lower, "repository not found"):
-		return model.Err("PERMISSION", "无法访问仓库，请确认访问账号及仓库地址；组织仓库还需在 GitHub 设置 → Applications 中为本应用申请或批准组织访问，使用 SSO 时请先登录组织再重新授权")
+		return model.Err("PERMISSION", "无法访问仓库，请确认访问账号及仓库地址；OAuth 登录需组织批准应用，Token 登录需组织允许该 Token，使用 SSO 时还需授权相应凭据")
 	case strings.Contains(lower, "fast-forward") || strings.Contains(lower, "non-fast-forward"):
 		return model.Err("DIVERGED", "分支已分叉或远程存在新提交，请在外部工具中处理后重试")
 	case strings.Contains(lower, "overwritten") || strings.Contains(lower, "unmerged") || strings.Contains(lower, "resolve your current index"):

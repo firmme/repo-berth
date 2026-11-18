@@ -17,6 +17,29 @@ type Authorization struct {
 	ExpiresIn       int    `json:"expiresIn"`
 }
 
+// ConnectToken uses the same account identity and credential isolation as OAuth.
+// The token is never included in tasks, snapshots, or persisted application state.
+func (s *Service) ConnectToken(token string, sessionOnly bool, replaceID string) (string, error) {
+	token = strings.TrimSpace(token)
+	if token == "" || len(token) > 4096 || strings.ContainsAny(token, " \t\r\n\x00") {
+		return "", model.Err("INVALID_TOKEN", "请输入有效的 GitHub Personal Access Token")
+	}
+	if replaceID != "" {
+		if _, err := s.account(replaceID); err != nil {
+			return "", err
+		}
+	}
+	return s.task("authorize", replaceID, func(ctx context.Context, taskID string) error {
+		_ = s.updateTask(taskID, func(t *model.Task) { t.Progress = "正在验证 Token 所属的 GitHub 账号" })
+		u, err := s.provider.CurrentUser(ctx, token)
+		if err != nil {
+			return err
+		}
+		data := authorizedIdentity{user: u, token: token, authentication: "pat", targetAccountID: replaceID, expiresAt: time.Now().Add(10 * time.Minute)}
+		return s.saveAuthorization(ctx, taskID, data, sessionOnly)
+	})
+}
+
 // Older versions allowed several authors per account. Keep any different
 // author already selected for a checkout as a project override, then retain
 // the first profile as the account's single default author.

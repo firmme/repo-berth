@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"repo-berth/internal/ghauth"
 	"repo-berth/internal/gitexec"
 	"repo-berth/internal/model"
 	"repo-berth/internal/provider"
@@ -40,6 +41,8 @@ type Service struct {
 	sem                   chan struct{}
 	accountLocks          map[string]operationLock
 	credentialLock        operationLock
+	cliLock               operationLock
+	githubCLI             githubCLI
 	pendingAuthorizations map[string]*authorizedIdentity
 	inflightCredentials   map[string]bool
 	desktop               Desktop
@@ -60,6 +63,8 @@ func New(path string, p provider.Provider, v vault.Vault) (*Service, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &Service{state: state, store: db, provider: p, vault: v, ctx: ctx, cancel: cancel, tasks: map[string]context.CancelFunc{}, locks: map[string]operationLock{}, accountLocks: map[string]operationLock{}, sem: make(chan struct{}, 3), emit: func(string, any) {}}
 	s.credentialLock = newOperationLock()
+	s.cliLock = newOperationLock()
+	s.githubCLI = &ghauth.Client{}
 	s.pendingAuthorizations = map[string]*authorizedIdentity{}
 	s.inflightCredentials = map[string]bool{}
 	for i := range s.state.Tasks {
@@ -544,7 +549,7 @@ func (s *Service) OpenCheckoutGitHub(id, remote string) error {
 	return d.OpenURL("https://github.com/" + target)
 }
 func (s *Service) OpenGitHubPage(kind string) error {
-	urls := map[string]string{"device": "https://github.com/login/device", "settings": "https://github.com/settings/developers", "authorizations": "https://github.com/settings/applications"}
+	urls := map[string]string{"cli": "https://cli.github.com/", "device": "https://github.com/login/device", "settings": "https://github.com/settings/developers", "authorizations": "https://github.com/settings/applications", "tokens": "https://github.com/settings/tokens", "new-token": "https://github.com/settings/tokens/new?scopes=repo,workflow&description=Repo%20Berth"}
 	url, ok := urls[kind]
 	if !ok {
 		return model.Err("INVALID_OPERATION", "不支持的 GitHub 页面")

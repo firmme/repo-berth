@@ -16,19 +16,20 @@ func ID() string {
 func Now() string { return time.Now().UTC().Format(time.RFC3339) }
 
 type Account struct {
-	ID            string `json:"id"`
-	Provider      string `json:"provider"`
-	Host          string `json:"host"`
-	UserID        int64  `json:"userId"`
-	Login         string `json:"login"`
-	Name          string `json:"name"`
-	Avatar        string `json:"avatar"`
-	Note          string `json:"note"`
-	Color         string `json:"color"`
-	CredentialRef string `json:"credentialRef"`
-	Status        string `json:"status"`
-	SessionOnly   bool   `json:"sessionOnly"`
-	SyncedAt      string `json:"syncedAt"`
+	ID             string `json:"id"`
+	Provider       string `json:"provider"`
+	Host           string `json:"host"`
+	UserID         int64  `json:"userId"`
+	Login          string `json:"login"`
+	Name           string `json:"name"`
+	Avatar         string `json:"avatar"`
+	Note           string `json:"note"`
+	Color          string `json:"color"`
+	CredentialRef  string `json:"credentialRef"`
+	Status         string `json:"status"`
+	SessionOnly    bool   `json:"sessionOnly"`
+	Authentication string `json:"authentication,omitempty"`
+	SyncedAt       string `json:"syncedAt"`
 }
 type CommitProfile struct {
 	ID        string `json:"id"`

@@ -170,6 +170,64 @@ afterEach(() => {
 });
 
 describe("identity maintenance", () => {
+  it("connects an explicitly selected CLI account and syncs it after successful verification", async () => {
+    const user = userEvent.setup();
+    const state = fixture();
+    mocks.api.mockImplementation(async (name: string) => name === "GitHubCLIAccounts" ? [{ login: "personal", active: false, state: "success" }, { login: "work", active: true, state: "success" }] : "cli-task");
+    const view = mount(<AccountsView st={state} execute={execute} />);
+    await user.click(screen.getByRole("button", { name: "通过 GitHub CLI 登录" }));
+    const dialog = screen.getByRole("dialog", { name: "通过官方 GitHub CLI 连接账号" });
+    const row = (await within(dialog).findByText("personal", { selector: "strong" })).closest(".profile-row") as HTMLElement;
+    await user.click(within(row).getByRole("button", { name: "连接此账号" }));
+    expect(mocks.api).toHaveBeenCalledWith("ConnectGitHubCLI", "personal", "", false);
+    const updated = { ...state, tasks: [{ id: "cli-task", kind: "authorize", target: "personal", state: "succeeded" } as Task] };
+    view.rerender(<QueryClientProvider client={clients[0]}><AccountsView st={updated} execute={execute} /></QueryClientProvider>);
+    await user.click(within(screen.getByRole("dialog", { name: "通过官方 GitHub CLI 连接账号" })).getByRole("button", { name: "同步仓库" }));
+    expect(mocks.api).toHaveBeenCalledWith("SyncRepositories", "personal");
+    expect(mocks.api.mock.calls.some(([name]) => name === "StartAuthorization")).toBe(false);
+  });
+
+  it("keeps CLI browser login tied to the account being replaced", async () => {
+    const user = userEvent.setup();
+    mocks.api.mockImplementation(async (name: string) => name === "GitHubCLIAccounts" ? [] : "cli-task");
+    mount(<AccountsView st={fixture()} execute={execute} />);
+    await user.click(screen.getByRole("button", { name: "改用 GitHub CLI" }));
+    await user.click(screen.getByRole("button", { name: "在浏览器登录 personal" }));
+    expect(mocks.api).toHaveBeenCalledWith("ConnectGitHubCLI", "", "personal", true);
+  });
+
+  it("connects a token account without OAuth configuration and clears the entered secret", async () => {
+    const user = userEvent.setup();
+    const state = fixture();
+    state.githubAuthConfigured = false;
+    mocks.api.mockResolvedValue("token-task");
+    mount(<AccountsView st={state} execute={execute} />);
+    await user.click(screen.getByRole("button", { name: "使用 Token 添加账号" }));
+    const input = screen.getByLabelText("Personal Access Token") as HTMLInputElement;
+    expect(input.type).toBe("password");
+    await user.type(input, "test-personal-pat");
+    await user.click(screen.getByRole("checkbox", { name: "仅本次会话保存" }));
+    await user.click(screen.getByRole("button", { name: "验证并保存" }));
+    await waitFor(() => expect(mocks.api).toHaveBeenCalledWith("ConnectToken", "test-personal-pat", true, ""));
+    expect(input.value).toBe("");
+    expect(screen.getByRole("status").textContent).toContain("正在验证账号");
+  });
+
+  it("replaces the selected account token without invoking OAuth", async () => {
+    const user = userEvent.setup();
+    mocks.api.mockResolvedValue("token-task");
+    const state = fixture();
+    state.accounts[0].authentication = "pat";
+    mount(<AccountsView st={state} execute={execute} />);
+    expect(screen.queryByRole("button", { name: "重新授权" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "更新 Token" }));
+    expect(screen.getByText(/Token 必须属于 personal/)).toBeTruthy();
+    await user.type(screen.getByLabelText("Personal Access Token"), "test-replacement-pat");
+    await user.click(screen.getByRole("button", { name: "验证并保存" }));
+    await waitFor(() => expect(mocks.api).toHaveBeenCalledWith("ConnectToken", "test-replacement-pat", false, "personal"));
+    expect(mocks.api.mock.calls.some(([name]) => name === "StartAuthorization")).toBe(false);
+  });
+
   it("lets a connected account repair organization authorization and sync that account", async () => {
     const user = userEvent.setup();
     mocks.api.mockImplementation(async (name: string) => {
@@ -1243,7 +1301,7 @@ describe("first launch", () => {
     );
     const dialog = screen.getByRole("dialog", { name: "账号与身份" });
     expect(
-      within(dialog).getByText("此构建的 GitHub 登录暂不可用"),
+      within(dialog).getByText("此构建的 GitHub 浏览器登录暂不可用"),
     ).toBeTruthy();
     expect(screen.queryByLabelText("OAuth Client ID")).toBeNull();
     expect(

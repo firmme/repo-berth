@@ -39,6 +39,8 @@ export function AccountsView({ st, execute }: { st: State; execute: Execute }) {
   const [busy, setBusy] = useState(false);
   const [recovering, setRecovering] = useState(false);
   const [newProfileAccount, setNewProfileAccount] = useState<Account>();
+  const [tokenAccount, setTokenAccount] = useState<Account | null>();
+  const [cliAccount, setCLIAccount] = useState<Account | null>();
   const begin = (id = "") =>
     execute(async () => {
       setBusy(true);
@@ -82,8 +84,10 @@ export function AccountsView({ st, execute }: { st: State; execute: Execute }) {
         <div>
           <h1>账号与身份</h1>
         </div>
+        <div className="actions">
+        <button className="primary" onClick={() => setCLIAccount(null)}><Github size={16} />通过 GitHub CLI 登录</button>
+        <button onClick={() => setTokenAccount(null)}><KeyRound size={16} />使用 Token 添加账号</button>
         <button
-          className="primary"
           disabled={busy || !st.githubAuthConfigured}
           title={
             !st.githubAuthConfigured
@@ -95,16 +99,17 @@ export function AccountsView({ st, execute }: { st: State; execute: Execute }) {
           <Plus size={16} />
           添加 GitHub 账号
         </button>
+        </div>
       </div>
       <CredentialCleanupNotice st={st} execute={execute} />
       {!st.githubAuthConfigured && (
         <div className="authorization-note">
           <Settings2 size={18} />
           <div>
-            <strong>此构建的 GitHub 登录暂不可用</strong>
+            <strong>此构建的 GitHub 浏览器登录暂不可用</strong>
             <p>
               应用发布配置缺失。使用者无需创建 OAuth 应用或填写 Client
-              ID，请使用已配置登录的版本。
+              ID。可使用 Token 添加账号，或使用已配置浏览器登录的版本。
             </p>
           </div>
         </div>
@@ -116,7 +121,7 @@ export function AccountsView({ st, execute }: { st: State; execute: Execute }) {
           <p>
             可以同时连接多个 GitHub 账号。
             <br />
-            点击“添加 GitHub 账号”，在系统浏览器中确认授权即可。
+            可在浏览器中授权，或使用各账号自己的 Personal Access Token。
           </p>
         </div>
       ) : (
@@ -127,6 +132,8 @@ export function AccountsView({ st, execute }: { st: State; execute: Execute }) {
             st={st}
             execute={execute}
             onAuthorize={() => void begin(a.id)}
+            onToken={() => setTokenAccount(a)}
+            onCLI={() => setCLIAccount(a)}
             onRemove={() => setRemove(a)}
           />
         ))
@@ -292,6 +299,8 @@ export function AccountsView({ st, execute }: { st: State; execute: Execute }) {
           </div>
         </Modal>
       )}
+      {tokenAccount !== undefined && <TokenAccountModal account={tokenAccount} st={st} execute={execute} onClose={() => setTokenAccount(undefined)} />}
+      {cliAccount !== undefined && <CLIAccountModal account={cliAccount} st={st} execute={execute} onClose={() => setCLIAccount(undefined)} />}
       {remove && (
         <Modal
           title={`移除 ${remove.login}？`}
@@ -336,12 +345,16 @@ function AccountPanel({
   st,
   execute,
   onAuthorize,
+  onToken,
+  onCLI,
   onRemove,
 }: {
   account: Account;
   st: State;
   execute: Execute;
   onAuthorize: () => void;
+  onToken: () => void;
+  onCLI: () => void;
   onRemove: () => void;
 }) {
   const [profileOpen, setProfileOpen] = useState(false);
@@ -360,7 +373,7 @@ function AccountPanel({
             </span>
           </h2>
           <p>
-            {a.name || "GitHub"} · github.com
+            {a.name || "GitHub"} · github.com · {a.authentication === "pat" ? "Personal Access Token" : a.authentication === "github-cli" ? "GitHub CLI" : "OAuth"}
             {a.sessionOnly ? " · 仅本次会话" : ""}
           </p>
         </div>
@@ -396,13 +409,15 @@ function AccountPanel({
           <span>{profile.email}</span>
         </div>
       )}
-      <p className="empty-note">
-        组织仓库未显示或无法访问？请确认浏览器登录的是 {a.login}，在 GitHub 应用授权设置中为本应用申请或批准组织访问。使用 SSO 的组织需先登录组织，再重新授权并同步仓库。
-      </p>
       <div className="account-footer actions">
-        <button className="text-button" disabled={!st.githubAuthConfigured} onClick={onAuthorize}>
-          <KeyRound size={14} />重新授权
+        <button className="text-button" onClick={onCLI}>{a.authentication === "github-cli" ? "更新 CLI 登录" : "改用 GitHub CLI"}</button>
+        <button className="text-button" onClick={onToken}>
+          <KeyRound size={14} />{a.authentication === "pat" ? "更新 Token" : "改用 Token"}
         </button>
+        {!a.authentication && <button className="text-button" disabled={!st.githubAuthConfigured} onClick={onAuthorize}>
+          重新授权
+        </button>}
+        {!a.authentication &&
         <a href="https://github.com/settings/applications" target="_blank" rel="noreferrer" onClick={(e) => {
           if (isDesktop) {
             e.preventDefault();
@@ -410,7 +425,7 @@ function AccountPanel({
           }
         }}>
           组织访问授权 <ExternalLink size={14} />
-        </a>
+        </a>}
         <button className="text-button" onClick={() => void execute(() => api("SyncRepositories", a.id))}>
           <RefreshCw size={14} />同步仓库
         </button>
@@ -425,6 +440,91 @@ function AccountPanel({
       )}
     </section>
   );
+}
+function CLIAccountModal({ account, st, execute, onClose }: { account: Account | null; st: State; execute: Execute; onClose: () => void }) {
+  const accounts = useQuery({ queryKey: ["github-cli-accounts"], queryFn: () => api("GitHubCLIAccounts"), retry: false });
+  const [taskID, setTaskID] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const task = st.tasks.find((t) => t.id === taskID);
+  const pending = !!taskID && (!task || ["queued", "running"].includes(task.state));
+  const connect = (login: string, browser: boolean) => execute(async () => {
+    setBusy(true); setError("");
+    try { setTaskID(await api("ConnectGitHubCLI", login, account?.id || "", browser)); }
+    catch (err) { setError(errorMessage(err)); }
+    finally { setBusy(false); }
+  });
+  return <Modal title={account ? `通过 GitHub CLI 连接 ${account.login}` : "通过官方 GitHub CLI 连接账号"} onClose={onClose}>
+    {task?.state === "succeeded" ? <>
+      <p>已连接 {st.accounts.find((a) => a.id === task.target)?.login || account?.login || "GitHub 账号"}，后续仓库操作使用这个账号的独立凭据。</p>
+      <div className="form-actions"><button className="primary" onClick={() => void execute(async () => { await api("SyncRepositories", task.target); onClose(); })}>同步仓库</button></div>
+    </> : <>
+      <p>通过官方 GitHub CLI 登录，或连接已登录的账号。无需手动复制 Token，可继续在 Repo Berth 中管理多个账号。</p>
+      {account && <p>请选择 {account.login}，验证账号归属后才会替换原凭据。</p>}
+      {accounts.isPending && <p role="status">正在读取 GitHub CLI 账号…</p>}
+      {accounts.error && <ErrorNotice message={errorMessage(accounts.error)} />}
+      {accounts.data?.length === 0 && <p className="empty-note">尚无已登录的 CLI 账号，可直接在浏览器登录。</p>}
+      {accounts.data?.filter((a) => !account || a.login.toLowerCase() === account.login.toLowerCase()).map((a) => <div className="profile-row" key={a.login}>
+        <strong>{a.login}</strong>
+        <button disabled={busy || pending || a.state !== "success"} onClick={() => void connect(a.login, false)}>{a.state === "success" ? "连接此账号" : "需要重新登录"}</button>
+      </div>)}
+      {(error || task?.error) && <ErrorNotice message={error || task?.error || ""} />}
+      {pending && <>
+        <p role="status">{task?.progress || "正在通过 GitHub CLI 连接账号…"}</p>
+        <a href="https://github.com/login/device" target="_blank" rel="noreferrer" onClick={(e) => { if (isDesktop) { e.preventDefault(); void execute(() => api("OpenGitHubPage", "device")); } }}>打开 GitHub 验证页面 <ExternalLink size={14} /></a>
+      </>}
+      {task?.canResumeAuthorization && <div className="actions">
+        <button onClick={() => void execute(async () => setTaskID(await api("RecoverAuthorization", taskID, false)))}>重试保存</button>
+        <button onClick={() => void execute(async () => setTaskID(await api("RecoverAuthorization", taskID, true)))}>仅本次会话保存</button>
+      </div>}
+      <div className="form-actions">
+        {pending ? <button onClick={() => void execute(async () => { await api("CancelTask", taskID); setTaskID(""); })}>取消登录</button> : <button className="primary" disabled={busy} onClick={() => void connect("", true)}>在浏览器登录{account ? ` ${account.login}` : "另一个账号"}</button>}
+        <button disabled={busy || pending} onClick={() => void accounts.refetch()}>刷新账号</button>
+      </div>
+      <p className="muted">需要安装官方 GitHub CLI。浏览器登录会更新 CLI 的当前账号；Repo Berth 的仓库访问仍按各自绑定账号选择凭据。</p>
+      <a href="https://cli.github.com/" target="_blank" rel="noreferrer" onClick={(e) => { if (isDesktop) { e.preventDefault(); void execute(() => api("OpenGitHubPage", "cli")); } }}>获取官方 GitHub CLI <ExternalLink size={14} /></a>
+    </>}
+  </Modal>;
+}
+
+function TokenAccountModal({ account, st, execute, onClose }: { account: Account | null; st: State; execute: Execute; onClose: () => void }) {
+  const [token, setToken] = useState("");
+  const [sessionOnly, setSessionOnly] = useState(false);
+  const [taskID, setTaskID] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const task = st.tasks.find((t) => t.id === taskID);
+  const pending = !!taskID && (!task || ["queued", "running"].includes(task.state));
+  const save = () => execute(async () => {
+    setBusy(true);
+    setError("");
+    try {
+      const id = await api("ConnectToken", token, sessionOnly, account?.id || "");
+      setToken("");
+      setTaskID(id);
+    } catch (err) { setError(errorMessage(err)); }
+    finally { setBusy(false); }
+  });
+  return <Modal title={account ? `更新 ${account.login} 的访问凭据` : "使用 Token 添加 GitHub 账号"} onClose={onClose}>
+    {task?.state === "succeeded" ? <>
+      <p>已连接 {st.accounts.find((a) => a.id === task.target)?.login || account?.login || "GitHub 账号"}。Token 已按账号独立保存，仓库绑定和提交身份保持不变。</p>
+      <div className="form-actions"><button className="primary" onClick={() => void execute(async () => { await api("SyncRepositories", task.target); onClose(); })}>同步仓库</button></div>
+    </> : <form onSubmit={(e) => { e.preventDefault(); void save(); }}>
+      <p>使用你自己的 Personal Access Token 访问仓库，每个账号独立保存和使用。</p>
+      <p className="muted" id="token-permissions">Classic Token 选择 repo；修改 Actions 工作流还需 workflow。Fine-grained Token 需选择目标仓库，并授予 Contents 读写权限。组织的 Token 策略和 SSO 仍适用。</p>
+      <a href="https://github.com/settings/tokens/new?scopes=repo,workflow&description=Repo%20Berth" target="_blank" rel="noreferrer" onClick={(e) => { if (isDesktop) { e.preventDefault(); void execute(() => api("OpenGitHubPage", "new-token")); } }}>创建 GitHub Token <ExternalLink size={14} /></a>
+      {account && <p>Token 必须属于 {account.login}，验证通过后才会替换原凭据。</p>}
+      <Field label="Personal Access Token"><input autoFocus required type="password" autoComplete="off" spellCheck={false} aria-describedby="token-permissions" value={token} disabled={busy || pending} onChange={(e) => setToken(e.target.value)} /></Field>
+      <label><input type="checkbox" checked={sessionOnly} disabled={busy || pending} onChange={(e) => setSessionOnly(e.target.checked)} />仅本次会话保存</label>
+      {(error || task?.error) && <ErrorNotice message={error || task?.error || ""} />}
+      {pending && <p role="status">正在验证账号并保存凭据…</p>}
+      {task?.canResumeAuthorization && <div className="actions">
+        <button type="button" onClick={() => void execute(async () => setTaskID(await api("RecoverAuthorization", taskID, false)))}>重试保存</button>
+        <button type="button" onClick={() => void execute(async () => setTaskID(await api("RecoverAuthorization", taskID, true)))}>仅本次会话保存</button>
+      </div>}
+      <div className="form-actions"><button type="button" onClick={onClose}>关闭</button><button className="primary" type="submit" disabled={busy || pending || !token.trim()}>验证并保存</button></div>
+    </form>}
+  </Modal>;
 }
 function ProfileModal({
   account,
