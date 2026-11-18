@@ -18,6 +18,9 @@ func TestRepositoryPaginationAndDeduplication(t *testing.T) {
 		if r.Header.Get("Authorization") != "Bearer test-secret" {
 			t.Error("missing auth")
 		}
+		if r.URL.Path != "/user/repos" || r.URL.Query().Get("affiliation") != "owner,collaborator,organization_member" {
+			t.Errorf("repository listing must include organization memberships: %s", r.URL)
+		}
 		pages++
 		repos := []map[string]any{}
 		if r.URL.Query().Get("page") == "1" {
@@ -38,6 +41,33 @@ func TestRepositoryPaginationAndDeduplication(t *testing.T) {
 	}
 	if len(repos) != 101 || pages != 2 {
 		t.Fatalf("pages=%d repos=%d", pages, len(repos))
+	}
+}
+
+func TestPartialSSORepositoryListIsRejectedOnAnyPage(t *testing.T) {
+	for _, partialPage := range []string{"1", "2"} {
+		t.Run(partialPage, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Query().Get("page") == partialPage {
+					w.Header().Set("X-GitHub-SSO", "partial-results; organizations=123; url=https://github.com/test-secret")
+					fmt.Fprint(w, `[{"id":999}]`)
+					return
+				}
+				batch := make([]Repository, 100)
+				for i := range batch {
+					batch[i].ID = int64(i + 1)
+				}
+				_ = json.NewEncoder(w).Encode(batch)
+			}))
+			defer server.Close()
+			g := NewGitHub()
+			g.API = server.URL
+			repos, err := g.Repositories(context.Background(), "test-secret")
+			ae, ok := err.(*model.AppError)
+			if !ok || ae.Code != "ORG_AUTH_REQUIRED" || repos != nil || strings.Contains(err.Error(), "test-secret") {
+				t.Fatalf("partial results accepted or header leaked: repos=%v error=%v", repos, err)
+			}
+		})
 	}
 }
 func TestDeviceSlowDownAndSuccess(t *testing.T) {

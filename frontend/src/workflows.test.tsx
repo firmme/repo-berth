@@ -170,6 +170,21 @@ afterEach(() => {
 });
 
 describe("identity maintenance", () => {
+  it("lets a connected account repair organization authorization and sync that account", async () => {
+    const user = userEvent.setup();
+    mocks.api.mockImplementation(async (name: string) => {
+      if (name === "StartAuthorization") return { taskId: "reauth", userCode: "TEST-CODE", verificationUri: "https://github.com/login/device", expiresIn: 600 };
+      return undefined;
+    });
+    mount(<AccountsView st={fixture()} execute={execute} />);
+    await user.click(screen.getByRole("link", { name: "组织访问授权" }));
+    expect(mocks.api).toHaveBeenCalledWith("OpenGitHubPage", "authorizations");
+    await user.click(screen.getByRole("button", { name: "同步仓库" }));
+    expect(mocks.api).toHaveBeenCalledWith("SyncRepositories", "personal");
+    await user.click(screen.getByRole("button", { name: "重新授权" }));
+    await waitFor(() => expect(mocks.api).toHaveBeenCalledWith("StartAuthorization", false, "personal"));
+  });
+
   it("edits the chosen profile ID only after explicit confirmation", async () => {
     const user = userEvent.setup();
     mount(<AccountsView st={fixture()} execute={execute} />);

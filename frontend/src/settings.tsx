@@ -396,7 +396,25 @@ function AccountPanel({
           <span>{profile.email}</span>
         </div>
       )}
-      {a.status === "auth_required" && <div className="account-footer"><button className="text-button" onClick={onAuthorize}><KeyRound size={14} />重新授权</button></div>}
+      <p className="empty-note">
+        组织仓库未显示或无法访问？请确认浏览器登录的是 {a.login}，在 GitHub 应用授权设置中为本应用申请或批准组织访问。使用 SSO 的组织需先登录组织，再重新授权并同步仓库。
+      </p>
+      <div className="account-footer actions">
+        <button className="text-button" disabled={!st.githubAuthConfigured} onClick={onAuthorize}>
+          <KeyRound size={14} />重新授权
+        </button>
+        <a href="https://github.com/settings/applications" target="_blank" rel="noreferrer" onClick={(e) => {
+          if (isDesktop) {
+            e.preventDefault();
+            void execute(() => api("OpenGitHubPage", "authorizations"));
+          }
+        }}>
+          组织访问授权 <ExternalLink size={14} />
+        </a>
+        <button className="text-button" onClick={() => void execute(() => api("SyncRepositories", a.id))}>
+          <RefreshCw size={14} />同步仓库
+        </button>
+      </div>
       {profileOpen && (
         <ProfileModal
           account={a}

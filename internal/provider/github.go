@@ -116,13 +116,18 @@ func (g *GitHub) do(ctx context.Context, method, endpoint, token string, body io
 		return model.Err("RATE_LIMIT", "GitHub 请求受限，请稍后重试")
 	}
 	if resp.StatusCode == 403 {
-		return model.Err("PERMISSION", "GitHub 拒绝访问，请检查仓库权限及组织 SSO 授权")
+		return model.Err("PERMISSION", "GitHub 拒绝访问；请确认访问账号有仓库权限，并在 GitHub 设置 → Applications 中为本应用申请或批准组织访问；使用 SSO 的组织需先登录组织再重新授权")
 	}
 	if resp.StatusCode == 422 {
 		return model.Err("INVALID_REQUEST", "GitHub 拒绝了请求，名称可能已存在或不符合规则")
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return model.Err("PROVIDER", "GitHub 返回异常状态 "+strconv.Itoa(resp.StatusCode))
+	}
+	// GitHub can return HTTP 200 while omitting repositories requiring SSO.
+	// Do not let a partial catalogue replace cached access relations.
+	if strings.EqualFold(strings.TrimSpace(strings.SplitN(resp.Header.Get("X-GitHub-SSO"), ";", 2)[0]), "partial-results") {
+		return model.Err("ORG_AUTH_REQUIRED", "GitHub 仅返回了部分仓库，部分组织需要 SSO 授权；请先在浏览器登录组织，再到账号与身份中重新授权并同步仓库；本次同步未覆盖已有仓库记录")
 	}
 	if err = json.NewDecoder(io.LimitReader(resp.Body, 16<<20)).Decode(out); err != nil {
 		return model.Err("PROVIDER", "GitHub 响应格式异常")
