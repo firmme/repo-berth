@@ -31,15 +31,19 @@ const version = JSON.parse(
   readFileSync(join(root, "frontend/package.json"), "utf8"),
 ).version;
 const arch = run("go", ["env", "GOARCH"]).trim();
+const update = process.argv.includes("--update");
+const releaseName = "RepoBerth-" + version + "-windows-" + arch + (update ? "-update" : "") + ".zip";
 const archiveArgument = process.argv
   .slice(2)
   .find((arg) => !arg.startsWith("--"));
 const archive = archiveArgument
   ? resolve(archiveArgument)
-  : join(root, `bin/releases/RepoBerth-${version}-windows-${arch}.zip`);
-const expected = readFileSync(archive + ".sha256", "utf8")
+  : join(root, "bin/releases", releaseName);
+if (update) assert.equal(basename(archive), releaseName);
+const [expected, checksumName] = readFileSync(archive + ".sha256", "utf8")
   .trim()
-  .split(/\s+/)[0];
+  .split(/\s+/);
+if (update) assert.equal(checksumName, releaseName);
 assert.match(expected, /^[a-f0-9]{64}$/);
 assert.equal(
   hash(readFileSync(archive)),
@@ -54,7 +58,7 @@ const names = JSON.parse(
       "-NoProfile",
       "-NonInteractive",
       "-Command",
-      "Add-Type -AssemblyName System.IO.Compression.FileSystem; $archive=[System.IO.Compression.ZipFile]::OpenRead($env:BERTH_VERIFY_ARCHIVE); try { @($archive.Entries | ForEach-Object { $_.FullName }) | ConvertTo-Json -Compress } finally { $archive.Dispose() }",
+      "Add-Type -AssemblyName System.IO.Compression.FileSystem; $archive=[System.IO.Compression.ZipFile]::OpenRead($env:BERTH_VERIFY_ARCHIVE); try { ConvertTo-Json -Compress -InputObject @($archive.Entries | ForEach-Object { $_.FullName }) } finally { $archive.Dispose() }",
     ],
     { env: environment },
   ),
@@ -62,32 +66,36 @@ const names = JSON.parse(
 assert(Array.isArray(names));
 const prefix = basename(archive, ".zip") + "/";
 const normalized = names.map((n) => n.replaceAll("\\", "/"));
-assert.equal(
-  new Set(normalized).size,
-  normalized.length,
-  "Duplicate archive entries",
-);
-for (const name of normalized) {
-  assert(
-    name.startsWith(prefix) && !name.split("/").includes(".."),
-    "Unexpected archive path: " + name,
+if (update) {
+  assert.deepEqual(normalized, ["RepoBerth.exe"], "Update ZIP must contain exactly one top-level executable");
+} else {
+  assert.equal(
+    new Set(normalized).size,
+    normalized.length,
+    "Duplicate archive entries",
   );
-  const item = name.slice(prefix.length);
-  assert(
-    item === "" ||
-      item === "licenses/" ||
-      /^licenses\/[a-z0-9-]+\/(?:[a-z0-9_. -]+)?$/i.test(item) ||
-      [
-        "RepoBerth.exe",
-        "README.md",
-        "PRODUCT_AUDIT.md",
-        "DEVELOPER_SETUP.md",
-        "BUILD.json",
-        "dependencies.json",
-        "THIRD_PARTY_NOTICES.txt",
-      ].includes(item),
-    "Unexpected artifact: " + item,
-  );
+  for (const name of normalized) {
+    assert(
+      name.startsWith(prefix) && !name.split("/").includes(".."),
+      "Unexpected archive path: " + name,
+    );
+    const item = name.slice(prefix.length);
+    assert(
+      item === "" ||
+        item === "licenses/" ||
+        /^licenses\/[a-z0-9-]+\/(?:[a-z0-9_. -]+)?$/i.test(item) ||
+        [
+          "RepoBerth.exe",
+          "README.md",
+          "PRODUCT_AUDIT.md",
+          "DEVELOPER_SETUP.md",
+          "BUILD.json",
+          "dependencies.json",
+          "THIRD_PARTY_NOTICES.txt",
+        ].includes(item),
+      "Unexpected artifact: " + item,
+    );
+  }
 }
 const releases = join(root, "bin/releases");
 mkdirSync(releases, { recursive: true });
@@ -99,10 +107,34 @@ try {
       "-NoProfile",
       "-NonInteractive",
       "-Command",
-      "Expand-Archive -LiteralPath $env:BERTH_VERIFY_ARCHIVE -DestinationPath $env:BERTH_VERIFY_DESTINATION",
+      "$ErrorActionPreference='Stop'; Add-Type -AssemblyName System.IO.Compression.FileSystem; [System.IO.Compression.ZipFile]::ExtractToDirectory($env:BERTH_VERIFY_ARCHIVE, $env:BERTH_VERIFY_DESTINATION)",
     ],
     { env: { ...environment, BERTH_VERIFY_DESTINATION: scratch } },
   );
+  if (update) {
+    const binary = join(scratch, "RepoBerth.exe");
+    const payload = readFileSync(binary);
+    assert.equal(payload.toString("ascii", 0, 2), "MZ");
+    const pe = payload.readUInt32LE(0x3c);
+    assert.equal(payload.toString("ascii", pe, pe + 4), "PE\0\0");
+    const machine = { amd64: 0x8664, arm64: 0xaa64, "386": 0x14c }[arch];
+    assert(machine && payload.readUInt16LE(pe + 4) === machine, "Windows executable architecture mismatch");
+    assert.equal(run(binary, ["--version"]).trim(), version, "Executable version mismatch");
+    console.log("PASS: Windows update archive contents, SHA-256, architecture and version");
+  } else {
+    verifyFullArchive(scratch);
+  }
+} finally {
+  const actual = realpathSync(scratch),
+    parent = realpathSync(releases);
+  assert(
+    actual.startsWith(parent + sep) && basename(actual).startsWith(".verify-"),
+    "Refusing to remove verification directory outside release root",
+  );
+  rmSync(actual, { recursive: true, force: true });
+}
+
+function verifyFullArchive(scratch) {
   const unpacked = join(scratch, basename(archive, ".zip"));
   const build = JSON.parse(readFileSync(join(unpacked, "BUILD.json"), "utf8"));
   const binary = join(unpacked, "RepoBerth.exe");
@@ -167,12 +199,4 @@ try {
   console.log(
     `PASS: archive checksum, allowlisted contents, ${inventory.dependencies.length} dependency inventories, every license hash; ${native ? "unpacked executable startup and local Git workflow verified" : "native UI checks explicitly skipped"}`,
   );
-} finally {
-  const actual = realpathSync(scratch),
-    parent = realpathSync(releases);
-  assert(
-    actual.startsWith(parent + sep) && basename(actual).startsWith(".verify-"),
-    "Refusing to remove verification directory outside release root",
-  );
-  rmSync(actual, { recursive: true, force: true });
 }

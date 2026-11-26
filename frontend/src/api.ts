@@ -1,5 +1,6 @@
 import type {
   State,
+  Task,
   Settings,
   Profile,
   Binding,
@@ -17,6 +18,8 @@ import type {
   WorkingFilePreview,
   CommitBinaryDiff,
   CheckoutHealth,
+  RecoveryRequest,
+  RecoveryPlan,
 } from "./types";
 import { emptyState } from "./types";
 
@@ -119,8 +122,11 @@ interface Methods {
   GitBranches: (id: string) => Branch[];
   StageFile: (id: string, file: string, stage: boolean) => void;
   StageFiles: (id: string, files: string[], stage: boolean) => void;
+  PreviewGitRecovery: (id: string, request: RecoveryRequest) => RecoveryPlan;
+  ApplyGitRecovery: (id: string, request: RecoveryRequest, fingerprint: string) => void;
   GitFileContent: (id: string, file: string) => string;
-  SaveWorkingFile: (id: string, file: string, content: string) => void;
+  ReadWorkingDocument: (id: string, file: string) => { content: string; version: string };
+  SaveWorkingDocument: (id: string, file: string, content: string, version: string) => string;
   CreateWorkingFile: (id: string, file: string) => void;
   CreateWorkingDirectory: (id: string, path: string) => void;
   RenameWorkingPath: (id: string, path: string, name: string) => void;
@@ -165,20 +171,16 @@ export async function api<K extends keyof Methods>(
 }
 export async function onStateChanged(
   callback: () => void,
-  onTaskFinished?: () => void,
+  onTaskFinished: (task: Task) => void,
 ): Promise<() => void> {
   if (!isDesktop) return () => {};
   const { Events } = await import("@wailsio/runtime");
   const offState = Events.On("state:changed", callback);
-  const offTask = Events.On("task:updated", (event) => {
-    const task = event.data as { state?: string };
-    if (task && task.state !== "running" && task.state !== "queued")
-      onTaskFinished?.();
+  const offTask = Events.On("task:updated", ({ data }) => {
+    const task = data as Task;
+    if (task?.id && task.state !== "queued" && task.state !== "running") onTaskFinished(task);
   });
-  return () => {
-    offState();
-    offTask();
-  };
+  return () => { offState(); offTask(); };
 }
 export async function onAppActivated(
   callback: () => void,

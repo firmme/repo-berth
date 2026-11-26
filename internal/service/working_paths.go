@@ -2,6 +2,7 @@ package service
 
 import (
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,21 +13,17 @@ import (
 
 func validEntryName(name string) error {
 	name = strings.TrimSpace(name)
-	if name == "" || name == "." || name == ".." || name == ".git" || strings.HasPrefix(name, "-") {
+	if name == "" || name == "." || name == ".." || strings.HasPrefix(name, "-") {
 		return model.Err("INVALID_PATH", "文件或目录名称无效")
 	}
 	if strings.ContainsAny(name, `/\`+"\x00") || strings.ContainsAny(name, `<>:"|?*`) {
 		return model.Err("INVALID_PATH", "文件或目录名称包含无效字符")
 	}
-	return nil
+	return gitexec.ValidFile(name)
 }
 
 func (s *Service) CreateWorkingDirectory(id, path string) error {
 	c, err := s.gitCheckout(id)
-	if err != nil {
-		return err
-	}
-	full, err := workingFilePath(c.Path, path)
 	if err != nil {
 		return err
 	}
@@ -38,12 +35,17 @@ func (s *Service) CreateWorkingDirectory(id, path string) error {
 	if err := s.validateCheckout(c); err != nil {
 		return err
 	}
-	if _, err := os.Lstat(full); err == nil {
+	root, full, err := openWorkingFilePath(c.Path, path)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	if _, err := root.Lstat(full); err == nil {
 		return model.Err("FILE_EXISTS", "目标已存在")
 	} else if !os.IsNotExist(err) {
 		return model.Err("WRITE_FAILED", "无法访问目标路径，请检查权限")
 	}
-	if err := os.MkdirAll(full, 0o755); err != nil {
+	if err := root.MkdirAll(full, 0o755); err != nil {
 		return model.Err("WRITE_FAILED", "无法创建目录，请检查权限")
 	}
 	return nil
@@ -57,11 +59,6 @@ func (s *Service) RenameWorkingPath(id, path, name string) error {
 	if err := validEntryName(name); err != nil {
 		return err
 	}
-	oldFull, err := workingFilePath(c.Path, path)
-	if err != nil {
-		return err
-	}
-	newFull := filepath.Join(filepath.Dir(oldFull), strings.TrimSpace(name))
 	lock := s.workLock(c.Path)
 	if err := lock.Lock(s.ctx); err != nil {
 		return err
@@ -70,15 +67,21 @@ func (s *Service) RenameWorkingPath(id, path, name string) error {
 	if err := s.validateCheckout(c); err != nil {
 		return err
 	}
-	if _, err := os.Lstat(oldFull); err != nil {
+	root, oldFull, err := openWorkingFilePath(c.Path, path)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	newFull := filepath.Join(filepath.Dir(oldFull), strings.TrimSpace(name))
+	if _, err := root.Lstat(oldFull); err != nil {
 		return model.Err("FILE_MISSING", "目标不存在，可能已被删除")
 	}
-	if _, err := os.Lstat(newFull); err == nil {
+	if _, err := root.Lstat(newFull); err == nil {
 		return model.Err("FILE_EXISTS", "同名文件或目录已存在")
 	} else if !os.IsNotExist(err) {
 		return model.Err("WRITE_FAILED", "无法访问目标路径，请检查权限")
 	}
-	if err := os.Rename(oldFull, newFull); err != nil {
+	if err := root.Rename(oldFull, newFull); err != nil {
 		return model.Err("WRITE_FAILED", "无法重命名，请检查权限或文件是否被占用")
 	}
 	return nil
@@ -89,10 +92,6 @@ func (s *Service) DeleteWorkingPath(id, path string) error {
 	if err != nil {
 		return err
 	}
-	full, err := workingFilePath(c.Path, path)
-	if err != nil {
-		return err
-	}
 	lock := s.workLock(c.Path)
 	if err := lock.Lock(s.ctx); err != nil {
 		return err
@@ -101,17 +100,22 @@ func (s *Service) DeleteWorkingPath(id, path string) error {
 	if err := s.validateCheckout(c); err != nil {
 		return err
 	}
-	info, err := os.Lstat(full)
+	root, full, err := openWorkingFilePath(c.Path, path)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	info, err := root.Lstat(full)
 	if err != nil {
 		return model.Err("FILE_MISSING", "目标不存在，可能已被删除")
 	}
 	if info.IsDir() {
-		if err := os.RemoveAll(full); err != nil {
+		if err := root.RemoveAll(full); err != nil {
 			return model.Err("WRITE_FAILED", "无法删除目录，请检查权限")
 		}
 		return nil
 	}
-	if err := os.Remove(full); err != nil {
+	if err := root.Remove(full); err != nil {
 		return model.Err("WRITE_FAILED", "无法删除文件，请检查权限")
 	}
 	return nil
@@ -122,13 +126,22 @@ func (s *Service) CopyWorkingPath(id, source, destinationDir string, cut bool) e
 	if err != nil {
 		return err
 	}
-	src, err := workingFilePath(c.Path, source)
+	lock := s.workLock(c.Path)
+	if err := lock.Lock(s.ctx); err != nil {
+		return err
+	}
+	defer lock.Unlock()
+	if err := s.validateCheckout(c); err != nil {
+		return err
+	}
+	root, src, err := openWorkingFilePath(c.Path, source)
 	if err != nil {
 		return err
 	}
-	destRoot := c.Path
+	defer root.Close()
+	destRoot := "."
 	if destinationDir != "" {
-		destRoot, err = workingFilePath(c.Path, destinationDir)
+		destRoot, err = workingFilePath(root, destinationDir)
 		if err != nil {
 			return err
 		}
@@ -138,60 +151,48 @@ func (s *Service) CopyWorkingPath(id, source, destinationDir string, cut bool) e
 	if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return model.Err("INVALID_PATH", "不能把目录复制或移动到自身内部")
 	}
-	lock := s.workLock(c.Path)
-	if err := lock.Lock(s.ctx); err != nil {
-		return err
-	}
-	defer lock.Unlock()
-	if err := s.validateCheckout(c); err != nil {
-		return err
-	}
-	info, err := os.Lstat(src)
-	if err != nil {
+	if _, err := root.Lstat(src); err != nil {
 		return model.Err("FILE_MISSING", "源文件不存在，可能已被删除")
 	}
-	if info.IsDir() {
-		if _, err := os.Lstat(destRoot); err != nil {
-			return model.Err("FILE_MISSING", "目标目录不存在")
-		}
-	} else if stat, err := os.Stat(destRoot); err != nil || !stat.IsDir() {
+	if stat, err := root.Lstat(destRoot); err != nil || !stat.IsDir() {
 		return model.Err("FILE_MISSING", "目标目录不存在")
 	}
-	if _, err := os.Lstat(dest); err == nil {
+	if _, err := root.Lstat(dest); err == nil {
 		return model.Err("FILE_EXISTS", "目标位置已有同名文件或目录")
 	} else if !os.IsNotExist(err) {
 		return model.Err("WRITE_FAILED", "无法访问目标路径，请检查权限")
 	}
 	if cut {
-		if err := os.Rename(src, dest); err != nil {
+		if err := root.Rename(src, dest); err != nil {
 			return model.Err("WRITE_FAILED", "无法移动，请检查权限或文件是否被占用")
 		}
 		return nil
 	}
-	if err := copyWorkingPath(src, dest); err != nil {
+	if err := copyWorkingPath(root, src, dest); err != nil {
 		return model.Err("WRITE_FAILED", "无法复制文件，请检查权限")
 	}
 	return nil
 }
 
-func copyWorkingPath(src, dest string) error {
-	info, err := os.Lstat(src)
+func copyWorkingPath(root *os.Root, src, dest string) error {
+	info, err := root.Lstat(src)
 	if err != nil {
 		return err
 	}
-	if info.Mode()&os.ModeSymlink != 0 {
-		return model.Err("UNSUPPORTED", "暂不支持复制符号链接")
+	if !info.Mode().IsRegular() && !info.IsDir() {
+		return model.Err("UNSUPPORTED", "只支持复制普通文件和目录")
 	}
 	if info.IsDir() {
-		if err := os.Mkdir(dest, info.Mode().Perm()); err != nil {
+		if err := root.Mkdir(dest, info.Mode().Perm()); err != nil {
 			return err
 		}
-		entries, err := os.ReadDir(src)
+		entries, err := fs.ReadDir(root.FS(), filepath.ToSlash(src))
 		if err != nil {
 			return err
 		}
 		for _, entry := range entries {
 			if err := copyWorkingPath(
+				root,
 				filepath.Join(src, entry.Name()),
 				filepath.Join(dest, entry.Name()),
 			); err != nil {
@@ -200,12 +201,12 @@ func copyWorkingPath(src, dest string) error {
 		}
 		return nil
 	}
-	in, err := os.Open(src)
+	in, err := root.Open(src)
 	if err != nil {
 		return err
 	}
 	defer in.Close()
-	out, err := os.OpenFile(dest, os.O_CREATE|os.O_EXCL|os.O_WRONLY, info.Mode().Perm())
+	out, err := root.OpenFile(dest, os.O_CREATE|os.O_EXCL|os.O_WRONLY, info.Mode().Perm())
 	if err != nil {
 		return err
 	}
@@ -226,10 +227,12 @@ func (s *Service) OpenWorkingPath(id, path, kind string) error {
 		if err := gitexec.ValidFile(path); err != nil {
 			return err
 		}
-		full, err = workingFilePath(c.Path, path)
+		root, name, err := openWorkingFilePath(c.Path, path)
 		if err != nil {
 			return err
 		}
+		defer root.Close()
+		full = filepath.Join(root.Name(), name)
 	}
 	info, err := os.Lstat(full)
 	if err != nil {

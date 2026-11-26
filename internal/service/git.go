@@ -63,7 +63,7 @@ func (s *Service) CheckRemoteUpdate(id, remote string) (RemoteCheck, error) {
 		return RemoteCheck{}, err
 	}
 	tracking := ""
-	if raw, err := s.runner().Run(ctx, c.Path, nil, nil, "rev-parse", "--verify", "--quiet", "refs/remotes/"+remote+"/"+head.Branch); err == nil {
+	if raw, err := s.runner().Run(ctx, c.Path, nil, nil, "rev-parse", "--verify", "--quiet", head.TrackingRef); err == nil {
 		tracking = strings.TrimSpace(raw)
 	}
 	return RemoteCheck{Remote: remote, Branch: head.Branch, Head: head.Head, Tracking: tracking, Updated: tracking != head.Head}, nil

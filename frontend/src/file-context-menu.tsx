@@ -15,6 +15,7 @@ import {
   Scissors,
   Terminal,
   Trash2,
+  Undo2,
 } from "lucide-react";
 import type { FileStatus } from "./types";
 import {
@@ -36,6 +37,7 @@ type Props = {
   rootPath: string;
   clipboard?: { path: string; cut: boolean };
   stageNode: (node: FileTreeNode, next: boolean) => void;
+  discardNode: (node: FileTreeNode) => void;
   nodeStaged: (node: FileTreeNode) => boolean;
   ignoreNode: (node: FileTreeNode) => void;
   forceTrackNode: (node: FileTreeNode) => void;
@@ -60,6 +62,7 @@ export function FileContextMenu({
   rootPath,
   clipboard,
   stageNode,
+  discardNode,
   nodeStaged,
   ignoreNode,
   forceTrackNode,
@@ -122,6 +125,7 @@ export function FileContextMenu({
                     {nodeStaged(menu.node) ? "取消暂存目录" : "暂存目录"}
                   </button>
                 )}
+              {flattenTree(menu.node).some(isChanged) && <button onClick={() => discardNode(menu.node)}><Undo2 size={14} />丢弃目录中的修改…</button>}
               {menu.node.path &&
                 flattenTree(menu.node).some((file) => file.ignored) && (
                   <button onClick={() => forceTrackNode(menu.node)}>
@@ -261,6 +265,7 @@ export function FileContextMenu({
                   {nodeStaged(menu.node) ? "取消暂存" : "暂存"}
                 </button>
               )}
+              {isChanged(menu.node.file!) && <button onClick={() => discardNode(menu.node)}><Undo2 size={14} />丢弃文件修改…</button>}
               {menu.node.file!.ignored && (
                 <button onClick={() => forceTrackNode(menu.node)}>
                   <Plus size={14} />

@@ -425,12 +425,17 @@ func TestStatusReportsTrackingForConfiguredRemote(t *testing.T) {
 	testGit(t, path, "-c", "user.name=Test", "-c", "user.email=test@example.test", "commit", "-m", "remote")
 	remoteCommit := testGit(t, path, "rev-parse", "HEAD")
 	testGit(t, path, "checkout", "main")
-	testGit(t, path, "update-ref", "refs/remotes/origin/main", remoteCommit)
+	testGit(t, path, "update-ref", "refs/remotes/origin/trunk", remoteCommit)
+	testGit(t, path, "branch", "--set-upstream-to=origin/trunk", "main")
+	target, trackingRef, err := r.networkTarget(ctx, path, "origin")
+	if err != nil || target != "trunk" || trackingRef != "refs/remotes/origin/trunk" {
+		t.Fatalf("unexpected network target %q %q (%v)", target, trackingRef, err)
+	}
 	status, err = r.Status(ctx, path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(status.Tracking) != 1 || status.Tracking[0].Ahead != 1 || status.Tracking[0].Behind != 1 {
+	if len(status.Tracking) != 1 || status.Tracking[0].Branch != "trunk" || status.Tracking[0].Ahead != 1 || status.Tracking[0].Behind != 1 {
 		t.Fatalf("unexpected diverged tracking: %+v", status.Tracking)
 	}
 }

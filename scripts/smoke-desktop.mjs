@@ -56,7 +56,7 @@ try{
  const picture=await send('Page.captureScreenshot',{format:'png'});await writeFile(resolve('bin/desktop-smoke.png'),Buffer.from(picture.data,'base64'));
  await evaluate(`document.querySelectorAll('[role="tab"]')[0].click()`);
  await evaluate(`Array.from(document.querySelectorAll('.detail-pane button')).find(b=>b.textContent==='移出管理').click()`);
- assert((await evaluate(`document.querySelector('dialog[open]').textContent`)).includes('不会删除文件、目录或 Git 提交'));
+ assert((await evaluate(`document.querySelector('dialog[open]').textContent`)).includes('磁盘文件和 Git 历史会保留'));
  await evaluate(`Array.from(document.querySelectorAll('dialog[open] button')).find(b=>b.textContent==='取消').click()`);
  assert((await call('Snapshot')).checkouts.some(c=>c.id===id),'Cancelling forget removed metadata');
  await evaluate(`Array.from(document.querySelectorAll('.detail-pane button')).find(b=>b.textContent==='移出管理').click()`);

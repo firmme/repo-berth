@@ -145,6 +145,15 @@
   margin-top: 18px;
   padding-top: 12px;
 }
+.recovery-options { border: 1px solid var(--rule); margin: 16px 0; padding: 12px; }
+.recovery-options label { display: flex; align-items: flex-start; gap: 8px; margin: 10px 0; }
+.recovery-options small { display: block; color: var(--muted); margin-top: 4px; }
+.recovery-options input[type="radio"], .recovery-check input[type="checkbox"] { width: 16px; height: 16px; flex: 0 0 16px; margin-top: 2px; }
+.recovery-check { display: flex; align-items: flex-start; gap: 8px; margin: 14px 0; }
+.recovery-files { max-height: 220px; overflow: auto; padding: 0; list-style: none; border-top: 1px solid var(--rule); }
+.recovery-files li { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; padding: 7px 0; border-bottom: 1px solid var(--rule); }
+.recovery-files code { overflow-wrap: anywhere; }
+.recovery-files span { flex-shrink: 0; color: var(--muted); }
 .settings-row {
   display: grid;
   grid-template-columns: minmax(200px, 0.85fr) minmax(280px, 1.25fr);

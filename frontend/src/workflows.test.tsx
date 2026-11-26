@@ -19,10 +19,10 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { AccountsView, SettingsView } from "./settings";
-import { RepositoryDetail, CloneForm } from "./repository";
+import { CloneForm } from "./repository";
 import { DirectoryField } from "./components";
 import { emptyState, type State, type Task } from "./types";
-import type { Execute, Row } from "./App";
+import type { Execute } from "./App";
 import App from "./App";
 import { useUI } from "./ui";
 
@@ -37,7 +37,10 @@ vi.mock("./api", () => ({
     mocks.refresh.push(refresh);
     return () => {};
   },
-  onAppActivated: async () => () => {},
+  onAppActivated: async (callback: () => void) => {
+    window.addEventListener("focus", callback);
+    return () => window.removeEventListener("focus", callback);
+  },
   errorMessage: (error: unknown) =>
     error instanceof Error ? error.message : String(error),
 }));
@@ -290,40 +293,44 @@ describe("identity maintenance", () => {
   });
 });
 
+function mountRepository(
+  state: State,
+  gitStatus: (id: string) => unknown = (id) => ({
+    branch: "main", upstream: "", ahead: 0, behind: 0, detached: false,
+    files: [], remotes: state.checkouts.find((checkout) => checkout.id === id)?.remotes || [],
+  }),
+  extra: (method: string, ...args: string[]) => unknown = () => undefined,
+) {
+  mocks.api.mockImplementation(async (method: string, ...args: string[]) => {
+    if (method === "Snapshot") return structuredClone(state);
+    if (method === "GitVersion") return "git version 2.49.0";
+    if (method === "GitStatus") return gitStatus(args[0]);
+    return extra(method, ...args);
+  });
+  useUI.getState().set({ selected: state.repositories[0]?.id || state.checkouts[0].id });
+  return mount(<App />);
+}
+
+async function openRepositorySettings(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(await screen.findByRole("button", { name: "仓库" }));
+  await user.click(await screen.findByRole("button", { name: "仓库设置…" }));
+  return screen.findByRole("dialog", { name: "仓库设置" });
+}
+
 describe("local checkout maintenance", () => {
-  function detail(onBack = vi.fn()) {
-    const state = fixture();
-    const checkout = state.checkouts[0];
-    const row: Row = {
-      id: checkout.id,
-      name: checkout.name,
-      owner: "本地仓库",
-      description: checkout.path,
-      checkouts: [checkout],
-      accountIDs: ["personal"],
-      favorite: false,
-      lastOpened: "",
-    };
-    mount(
-      <RepositoryDetail
-        row={row}
-        st={state}
-        execute={execute}
-        onClone={vi.fn()}
-        onBack={onBack}
-      />,
-    );
-    return onBack;
-  }
   it("requires a named confirmation before forgetting a checkout", async () => {
     const user = userEvent.setup();
-    const onBack = detail();
-    await user.click(screen.getByRole("button", { name: "移出管理" }));
+    const state = fixture();
+    mountRepository(state, undefined, (method) => {
+      if (method === "ForgetCheckout") state.checkouts = [];
+    });
+    const settings = await openRepositorySettings(user);
+    await user.click(within(settings).getByRole("button", { name: "将此副本移出管理…" }));
     const dialog = screen.getByRole("dialog", {
       name: "将此本地副本移出管理？",
     });
     expect(
-      within(dialog).getByText(/不会删除文件、目录或 Git 提交/),
+      within(dialog).getByText(/磁盘文件和 Git 历史会保留/),
     ).toBeTruthy();
     expect(
       mocks.api.mock.calls.some(([name]) => name === "ForgetCheckout"),
@@ -332,12 +339,13 @@ describe("local checkout maintenance", () => {
     await waitFor(() =>
       expect(mocks.api).toHaveBeenCalledWith("ForgetCheckout", "checkout"),
     );
-    expect(onBack).toHaveBeenCalledOnce();
+    await screen.findByRole("heading", { name: "选择仓库" });
   });
   it("cancel leaves the checkout managed", async () => {
     const user = userEvent.setup();
-    detail();
-    await user.click(screen.getByRole("button", { name: "移出管理" }));
+    mountRepository(fixture());
+    const settings = await openRepositorySettings(user);
+    await user.click(within(settings).getByRole("button", { name: "将此副本移出管理…" }));
     const dialog = screen.getByRole("dialog", {
       name: "将此本地副本移出管理？",
     });
@@ -453,7 +461,7 @@ describe("repository tools", () => {
       name: "将此本地副本移出管理？",
     });
     expect(
-      within(dialog).getByText(/不删除文件或 Git 历史/),
+      within(dialog).getByText(/磁盘文件和 Git 历史会保留/),
     ).toBeTruthy();
     await user.click(within(dialog).getByRole("button", { name: "移出管理" }));
     await waitFor(() =>
@@ -642,36 +650,14 @@ describe("multiple local copies", () => {
   }
   it("explains missing cloud access while keeping the bound local copy available", async () => {
     const state = multiState();
-    const row: Row = {
-      id: "shared",
-      name: "project",
-      owner: "org",
-      description: "",
-      repository: state.repositories[0],
-      checkouts: state.checkouts,
-      accountIDs: ["personal"],
-      favorite: false,
-      lastOpened: "",
-    };
-    mount(
-      <RepositoryDetail
-        row={row}
-        st={state}
-        execute={execute}
-        onClone={vi.fn()}
-        onBack={vi.fn()}
-      />,
-    );
-    expect(screen.getByRole("status").textContent).toContain("最近的同步列表");
-    await waitFor(() =>
-      expect(
-        (screen.getByRole("button", { name: "Fetch" }) as HTMLButtonElement)
-          .disabled,
-      ).toBe(false),
-    );
-    expect((screen.getByLabelText("本地副本") as HTMLSelectElement).value).toBe(
-      "checkout",
-    );
+    const user = userEvent.setup();
+    mountRepository(state);
+    await waitFor(() => expect(
+      screen.getByRole<HTMLButtonElement>("button", { name: /Fetch origin/ }).disabled,
+    ).toBe(false));
+    const settings = await openRepositorySettings(user);
+    expect(within(settings).getByText(/最近的同步列表/)).toBeTruthy();
+    expect(within(settings).getByLabelText<HTMLSelectElement>("本地副本").value).toBe("checkout");
   });
   it("does not silently switch identities when the selected remote disappears", async () => {
     const state = multiState();
@@ -700,70 +686,23 @@ describe("multiple local copies", () => {
       pushUrl: state.repositories[0].cloneUrl,
     }));
     let remotes = allRemotes;
-    mocks.api.mockImplementation(async (name: string) =>
-      name === "GitStatus"
-        ? {
-            branch: "main",
-            upstream: "",
-            ahead: 0,
-            behind: 0,
-            detached: false,
-            files: [],
-            remotes,
-          }
-        : undefined,
-    );
-    const row: Row = {
-      id: "shared",
-      name: "project",
-      owner: "org",
-      description: "",
-      repository: state.repositories[0],
-      checkouts: state.checkouts,
-      accountIDs: ["personal", "work"],
-      favorite: false,
-      lastOpened: "",
-    };
     const user = userEvent.setup();
-    mount(
-      <RepositoryDetail
-        row={row}
-        st={state}
-        execute={execute}
-        onClone={vi.fn()}
-        onBack={vi.fn()}
-      />,
-    );
-    expect(
-      (screen.getByRole("button", { name: "Fetch" }) as HTMLButtonElement)
-        .disabled,
-    ).toBe(true);
-    await waitFor(() =>
-      expect(
-        (screen.getByRole("button", { name: "Fetch" }) as HTMLButtonElement)
-          .disabled,
-      ).toBe(false),
-    );
+    mountRepository(state, () => ({
+      branch: "main", upstream: "", ahead: 0, behind: 0, detached: false,
+      files: [], remotes,
+    }));
+    await waitFor(() => expect(
+      screen.getByRole<HTMLButtonElement>("button", { name: /Fetch origin/ }).disabled,
+    ).toBe(false));
     remotes = allRemotes.filter((r) => r.name !== "origin");
-    await user.click(screen.getByRole("button", { name: "刷新仓库状态" }));
-    await screen.findByText(/remote「origin」当前不存在/);
-    expect(
-      (screen.getByLabelText("选择 remote") as HTMLSelectElement).value,
-    ).toBe("");
-    for (const name of ["Fetch", "Pull", "Push"])
-      expect(
-        (screen.getByRole("button", { name }) as HTMLButtonElement).disabled,
-      ).toBe(true);
+    window.dispatchEvent(new Event("focus"));
+    await screen.findByRole("button", { name: /请选择远端/ });
     expect(screen.queryByText("Work Name")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "更多远端操作" }));
     await user.selectOptions(screen.getByLabelText("选择 remote"), "upstream");
-    expect(screen.getByText("Work Name")).toBeTruthy();
+    expect(await screen.findByText("Work Name")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Fetch" }));
-    expect(mocks.api).toHaveBeenCalledWith(
-      "GitNetwork",
-      "checkout",
-      "upstream",
-      "fetch",
-    );
+    expect(mocks.api).toHaveBeenCalledWith("GitNetwork", "checkout", "upstream", "fetch");
   });
   it("opens the copy and remote bound to the account being filtered", async () => {
     const state = multiState();
@@ -830,119 +769,85 @@ describe("multiple local copies", () => {
   it("offers account management for expired authorization without blocking local changes", async () => {
     const state = multiState();
     state.accounts[0].status = "auth_required";
-    const row: Row = {
-      id: "shared",
-      name: "project",
-      owner: "org",
-      description: "",
-      repository: state.repositories[0],
-      checkouts: state.checkouts,
-      accountIDs: ["personal"],
-      favorite: false,
-      lastOpened: "",
-    };
     const user = userEvent.setup();
-    mount(
-      <RepositoryDetail
-        row={row}
-        st={state}
-        execute={execute}
-        onClone={vi.fn()}
-        onBack={vi.fn()}
-      />,
-    );
-    expect(screen.getByRole("status").textContent).toContain("需要重新授权");
-    for (const name of ["Fetch", "Pull", "Push"])
-      expect(
-        (screen.getByRole("button", { name }) as HTMLButtonElement).disabled,
-      ).toBe(true);
-    expect(
-      (screen.getByRole("tab", { name: "变更" }) as HTMLButtonElement).disabled,
-    ).toBe(false);
+    mountRepository(state);
+    expect(await screen.findByText("需要重新授权")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "更多远端操作" }));
+    for (const name of ["Fetch", "Pull", "Push"]) {
+      expect(screen.getByRole<HTMLButtonElement>("button", { name }).disabled).toBe(true);
+    }
+    expect(screen.getByRole<HTMLButtonElement>("tab", { name: "变更" }).disabled).toBe(false);
     await user.click(screen.getByRole("button", { name: "管理账号授权" }));
-    expect(useUI.getState().view).toBe("accounts");
+    expect(screen.getByRole("dialog", { name: "账号与身份" })).toBeTruthy();
   });
   it("isolates selected diffs and preserves separate commit drafts when switching copies", async () => {
     const state = multiState();
-    mocks.api.mockImplementation(async (name: string, id: string) => {
-      if (name === "GitStatus")
-        return {
-          branch: "main",
-          upstream: "",
-          ahead: 0,
-          behind: 0,
-          detached: false,
-          remotes: [
-            {
-              name: "origin",
-              url: state.repositories[0].cloneUrl,
-              pushUrl: state.repositories[0].cloneUrl,
-            },
-          ],
-          files: [
-            {
-              path: id === "checkout" ? "personal.txt" : "work.txt",
-              originalPath: "",
-              index: "M",
-              worktree: " ",
-            },
-          ],
-        };
-      if (name === "GitDiff") return "test file changes";
+    const user = userEvent.setup();
+    mountRepository(state, (id) => ({
+      branch: "main", upstream: "", ahead: 0, behind: 0, detached: false,
+      remotes: state.checkouts[0].remotes,
+      files: [{ path: id === "checkout" ? "personal.txt" : "work.txt", index: "M", worktree: " " }],
+    }), (method, _id, path) => {
+      if (method === "GitDiff") return "test file changes";
+      if (method === "InspectWorkingFile") return { path, previewKind: "text", editable: true };
       return undefined;
     });
-    const row: Row = {
-      id: "shared",
-      name: "project",
-      owner: "org",
-      description: "",
-      repository: state.repositories[0],
-      checkouts: state.checkouts,
-      accountIDs: ["personal"],
-      favorite: false,
-      lastOpened: "",
-    };
-    const user = userEvent.setup();
-    mount(
-      <RepositoryDetail
-        row={row}
-        st={state}
-        execute={execute}
-        onClone={vi.fn()}
-        onBack={vi.fn()}
-      />,
-    );
-    await user.click(screen.getByRole("tab", { name: "变更" }));
-    await user.click(
-      await screen.findByRole("button", { name: /personal.txt/ }),
-    );
-    await user.type(screen.getByLabelText("提交信息"), "personal draft");
-    await waitFor(() =>
-      expect(mocks.api).toHaveBeenCalledWith(
-        "GitDiff",
-        "checkout",
-        "personal.txt",
-        true,
-      ),
-    );
-    await user.selectOptions(screen.getByLabelText("本地副本"), "work-copy");
-    await screen.findByRole("button", { name: /work.txt/ });
-    expect(
-      (screen.getByLabelText("提交信息") as HTMLTextAreaElement).value,
-    ).toBe("");
-    expect(screen.queryByRole("heading", { name: "personal.txt" })).toBeNull();
-    expect(mocks.api).not.toHaveBeenCalledWith(
-      "GitDiff",
-      "work-copy",
-      "personal.txt",
-      true,
-    );
-    await user.type(screen.getByLabelText("提交信息"), "work draft");
-    await user.selectOptions(screen.getByLabelText("本地副本"), "checkout");
-    expect(
-      (screen.getByLabelText("提交信息") as HTMLTextAreaElement).value,
-    ).toBe("personal draft");
+    await user.click(await screen.findByText("personal.txt", { exact: true }));
+    await user.type(screen.getByLabelText("提交摘要"), "personal draft");
+    await waitFor(() => expect(mocks.api).toHaveBeenCalledWith(
+      "GitDiff", "checkout", "personal.txt", true,
+    ));
+    let settings = await openRepositorySettings(user);
+    await user.selectOptions(within(settings).getByLabelText("本地副本"), "work-copy");
+    await user.click(within(settings).getByRole("button", { name: "关闭" }));
+    await screen.findByText("work.txt", { exact: true });
+    expect(screen.getByLabelText<HTMLInputElement>("提交摘要").value).toBe("");
+    expect(screen.queryByText("personal.txt", { exact: true })).toBeNull();
+    expect(mocks.api).not.toHaveBeenCalledWith("GitDiff", "work-copy", "personal.txt", true);
+    await user.type(screen.getByLabelText("提交摘要"), "work draft");
+    settings = await openRepositorySettings(user);
+    await user.selectOptions(within(settings).getByLabelText("本地副本"), "checkout");
+    await user.click(within(settings).getByRole("button", { name: "关闭" }));
+    expect(screen.getByLabelText<HTMLInputElement>("提交摘要").value).toBe("personal draft");
     expect(useUI.getState().commitDrafts["work-copy"]).toBe("work draft");
+  });
+  it("keeps the editor draft on a refused copy switch or a stale save", async () => {
+    const state = multiState();
+    const user = userEvent.setup();
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    try {
+      mountRepository(state, (id) => ({
+        branch: "main", upstream: "", ahead: 0, behind: 0, detached: false,
+        remotes: state.checkouts[0].remotes,
+        files: [{ path: id === "checkout" ? "personal.txt" : "work.txt", index: " ", worktree: "M" }],
+      }), (method) => {
+        if (method === "InspectWorkingFile") return { path: "personal.txt", previewKind: "text", editable: true };
+        if (method === "ReadWorkingDocument") return { content: "original", version: "original-version" };
+        if (method === "SaveWorkingDocument") throw new Error("磁盘文件已修改");
+        return "";
+      });
+      await user.click(await screen.findByText("personal.txt", { exact: true }));
+      await user.click(await screen.findByRole("button", { name: "在应用中编辑文件" }));
+      const editor = await screen.findByLabelText<HTMLTextAreaElement>("编辑 personal.txt");
+      await user.type(editor, " draft", { initialSelectionStart: editor.value.length, initialSelectionEnd: editor.value.length });
+      await user.click(screen.getByRole("button", { name: "保存" }));
+      expect(await screen.findByText("磁盘文件已修改")).toBeTruthy();
+      expect(mocks.api).toHaveBeenCalledWith(
+        "SaveWorkingDocument", "checkout", "personal.txt", "original draft", "original-version",
+      );
+      const settings = await openRepositorySettings(user);
+      const select = within(settings).getByLabelText<HTMLSelectElement>("本地副本");
+      await user.selectOptions(select, "work-copy");
+      expect(confirm).toHaveBeenCalledOnce();
+      expect(select.value).toBe("checkout");
+      expect(editor.value).toBe("original draft");
+      confirm.mockReturnValue(true);
+      await user.selectOptions(select, "work-copy");
+      await user.click(within(settings).getByRole("button", { name: "关闭" }));
+      await screen.findByText("work.txt", { exact: true });
+    } finally {
+      confirm.mockRestore();
+    }
   });
   it("opens the exact local copy from a failed task and clears obstructing filters", async () => {
     const state = multiState();
@@ -1334,6 +1239,62 @@ describe("task center notifications", () => {
     startedAt: new Date().toISOString(),
     finishedAt: state === "succeeded" ? new Date().toISOString() : "",
   });
+  it("keeps the network toolbar in sync with the selected repository's tasks", async () => {
+    const state = fixture();
+    let finishRequest!: (taskId: string) => void;
+    const request = new Promise<string>((resolve) => { finishRequest = resolve; });
+    mocks.api.mockImplementation(async (name: string) => {
+      if (name === "Snapshot") return structuredClone(state);
+      if (name === "GitVersion") return "git version 2.49.0";
+      if (name === "GitNetwork") return request;
+      if (name === "GitStatus") return {
+        branch: "main",
+        upstream: "origin/main",
+        ahead: 0,
+        behind: 1,
+        detached: false,
+        files: [],
+        remotes: state.checkouts[0].remotes,
+      };
+      return null;
+    });
+    useUI.getState().set({ selected: "checkout" });
+    const user = userEvent.setup();
+    mount(<App />);
+    const button = await screen.findByRole<HTMLButtonElement>("button", {
+      name: /Pull origin.*状态更新/,
+    });
+    expect(button.querySelector(".network-spinner")).toBeNull();
+    await user.click(button);
+    expect(mocks.api).toHaveBeenCalledWith("GitNetwork", "checkout", "origin", "pull");
+    await screen.findByText("正在启动 Pull…");
+    expect(button.disabled).toBe(true);
+    expect(button.querySelector(".network-spinner")).toBeTruthy();
+
+    state.tasks = [task("pull", "queued", "pull")];
+    finishRequest("pull");
+    await screen.findByText("排队中 · Pull");
+    expect(button.querySelector(".network-spinner")).toBeTruthy();
+
+    state.tasks = [task("pull", "running", "pull")];
+    mocks.refresh.forEach((refresh) => refresh());
+    await screen.findByText("进行中 · Pull");
+
+    state.tasks = [
+      task("pull", "cancelled", "pull"),
+      { ...task("other", "running", "fetch"), target: "other-checkout" },
+      { ...task("sync", "running", "sync"), target: "personal" },
+    ];
+    mocks.refresh.forEach((refresh) => refresh());
+    await screen.findByText("进行中 · 同步仓库");
+    expect(button.disabled).toBe(false);
+
+    state.tasks.pop();
+    mocks.refresh.forEach((refresh) => refresh());
+    await screen.findByRole("button", { name: /Pull origin.*状态更新/ });
+    expect(button.querySelector(".network-spinner")).toBeNull();
+  });
+
   it("keeps completed tasks visible and clears the unread badge on demand", async () => {
     const state = fixture();
     state.tasks = [task("done-push", "succeeded", "push")];
@@ -1359,7 +1320,7 @@ describe("task center notifications", () => {
     expect(badge.textContent).toBe("1");
     expect(badge.className).toBe("task-badge");
     expect(screen.queryByRole("complementary", { name: "任务中心" })).toBeNull();
-    expect(screen.getByRole("status", { name: "新消息通知" })).toBeTruthy();
+    expect(screen.queryByRole("status", { name: "新消息通知" })).toBeNull();
 
     state.tasks[0] = {
       ...state.tasks[0],

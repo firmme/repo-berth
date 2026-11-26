@@ -39,12 +39,16 @@ export const useUI = create<UI>((set) => ({
   toastTaskId: "",
   toastRevision: 0,
   notifyTask: (task, local = false) =>
-    set((s) => ({
-      localTasks: local ? [task, ...s.localTasks].slice(0, 200) : s.localTasks,
-      unreadTaskIds: [...new Set([...s.unreadTaskIds, task.id])],
-      toastTaskId: s.tasksOpen ? "" : task.id,
-      toastRevision: s.toastRevision + 1,
-    })),
+    set((s) => {
+      const showToast = !s.tasksOpen &&
+        (task.state === "failed" || task.state === "interrupted" || task.canResumeAuthorization);
+      return {
+        localTasks: local ? [task, ...s.localTasks].slice(0, 200) : s.localTasks,
+        unreadTaskIds: [...new Set([...s.unreadTaskIds, task.id])],
+        toastTaskId: showToast ? task.id : s.toastTaskId,
+        toastRevision: s.toastRevision + (showToast ? 1 : 0),
+      };
+    }),
   dismissToast: () => set({ toastTaskId: "" }),
   commitDrafts: {},
   commitSubmissions: {},

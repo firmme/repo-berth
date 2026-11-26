@@ -74,6 +74,7 @@ import {
 } from "./types";
 import { rowsFromState, filterRows, type Execute, type Row } from "./catalog";
 import { useUI } from "./ui";
+import { useTaskUpdates } from "./task-updates";
 import {
   LANGUAGES,
   detectLanguage,
@@ -117,7 +118,7 @@ import { AccountsView, SettingsView } from "./settings";
 import { Worktree } from "./worktree";
 import { NoticesView } from "./notices";
 import { BindingModal, CloneForm, CloneURLForm, ShareForm } from "./repository";
-import { ImportModal, TaskRow, TaskToast } from "./workspace-tools";
+import { ImportModal, TaskRow, TaskToast, taskNames } from "./workspace-tools";
 import {
   CheckoutIdentity,
   LocalManagement,
@@ -179,9 +180,11 @@ export default function Desktop() {
     void import("@wailsio/runtime").then(({ Window }) => Window[command]());
   };
   const [copyID, setCopyID] = useState(""),
-    [remoteChoices, setRemoteChoices] = useState<Record<string, string>>({}),
-    [remoteCheck, setRemoteCheck] = useState<RemoteCheck>();
-  const remoteCheckTimes = useRef<Record<string, number>>({});
+    [remoteChoices, setRemoteChoices] = useState<Record<string, string>>({});
+  const [networkRequest, setNetworkRequest] = useState<{
+    checkoutId: string;
+    operation: string;
+  }>();
   const checkRemoteUpdateRef = useRef<() => void>(() => {});
   const [cloneID, setCloneID] = useState(""),
     [cloneRequest, setCloneRequest] = useState<Task["cloneRequest"]>();
@@ -194,16 +197,13 @@ export default function Desktop() {
   );
   const [tab, setTab] = useState<"changes" | "history">("changes");
   const [error, setError] = useState(""),
-    [pending, setPending] = useState(false),
+    [pendingOperations, setPendingOperations] = useState(0),
     [repositorySearch, setRepositorySearch] = useState("");
   const [branchSearch, setBranchSearch] = useState(""),
     [newBranch, setNewBranch] = useState(""),
     [collapsedBranchFolders, setCollapsedBranchFolders] = useState<Set<string>>(
       new Set(),
     );
-  const [lastFetched, setLastFetched] = useState<Record<string, string>>({});
-  const seenTasks = useRef<Set<string> | null>(null);
-  const notifiedTasks = useRef<Map<string, string> | null>(null);
   const nativeCommands = useRef<Record<string, () => void>>({});
   const {
     data: st = emptyState,
@@ -212,14 +212,15 @@ export default function Desktop() {
   } = useQuery({
     queryKey: ["state"],
     queryFn: () => api("Snapshot"),
-    refetchInterval: isDesktop ? 5000 : false,
+    refetchInterval: isDesktop ? 15000 : false,
   });
-  const rows = rowsFromState(st);
+  const rows = useMemo(() => rowsFromState(st), [st]);
   const selected =
     rows.find((r) => r.id === ui.selected) ||
     rows.find((r) => r.checkouts.some((c) => c.id === copyID));
   const checkout =
     selected?.checkouts.find((c) => c.id === copyID) || selected?.checkouts[0];
+  const canLeaveWorktree = useRef(() => true);
   const restored = useRef(false);
   useEffect(() => {
     if (restored.current || loading || ui.selected) return;
@@ -282,7 +283,6 @@ export default function Desktop() {
   const ahead = tracking?.ahead ?? (matchingUpstream ? status.data?.ahead ?? 0 : 0);
   const behind = tracking?.behind ?? (matchingUpstream ? status.data?.behind ?? 0 : 0);
   const lastFetch =
-    lastFetched[checkout?.id || ""] ||
     st.tasks.find(
       (t) =>
         t.kind === "fetch" &&
@@ -298,13 +298,21 @@ export default function Desktop() {
     profile,
     source: accessSource,
   } = resolveAccessAccount(st, checkout, remote);
-  const busy =
-    pending ||
-    st.tasks.some(
-      (t) =>
-        t.target === checkout?.id && ["queued", "running"].includes(t.state),
-    );
+  const tasks = [...ui.localTasks, ...st.tasks].sort((a, b) =>
+    b.startedAt.localeCompare(a.startedAt),
+  );
+  const activeTasks = tasks.filter((t) =>
+    ["queued", "running"].includes(t.state),
+  );
+  const checkoutTasks = checkout
+    ? activeTasks.filter((t) => t.target === checkout.id)
+    : [];
+  const busy = pendingOperations > 0 || checkoutTasks.length > 0;
+  const refreshingStatus =
+    !!checkout && !checkout.plainDirectory && status.isFetching;
   const verifying = status.isPending || status.isFetching || status.isError;
+  const currentRequest =
+    networkRequest?.checkoutId === checkout?.id ? networkRequest : undefined;
   const networkDisabled =
     !checkout ||
     !!checkout.plainDirectory ||
@@ -312,9 +320,46 @@ export default function Desktop() {
     !account ||
     account.status === "auth_required" ||
     busy ||
+    !!networkRequest ||
     verifying;
+  const lastNetworkTask = st.tasks.find(
+    (t) =>
+      t.target === checkout?.id &&
+      t.state === "succeeded" &&
+      ["fetch", "pull", "push"].includes(t.kind),
+  );
+  const remoteCheckQuery = {
+    queryKey: [
+      "remote-update", checkout?.id, remote, status.data?.branch, tracking?.branch,
+      account?.id, account?.status, lastNetworkTask?.id,
+    ],
+    queryFn: async (): Promise<RemoteCheck | null> =>
+      (await api("CheckRemoteUpdate", checkout!.id, remote)) ?? null,
+    staleTime: 10000,
+    retry: false,
+  };
+  const remoteCheck = useQuery({ ...remoteCheckQuery, enabled: false });
   const remoteHasUpdates =
-    !!remoteCheck?.updated && remoteCheck.remote === remote;
+    !!remoteCheck.data?.updated && remoteCheck.data.remote === remote;
+  const relatedTasks = activeTasks.filter(
+    (t) =>
+      (t.kind === "sync" &&
+        (t.target === account?.id || selected?.accountIDs.includes(t.target))) ||
+      (t.kind === "clone" && t.target === selected?.repository?.id),
+  );
+  const visibleTasks = checkoutTasks.length ? checkoutTasks : relatedTasks;
+  const currentTask =
+    visibleTasks.find((t) => t.state === "running") ?? visibleTasks[0];
+  let networkActivity = "";
+  if (currentRequest && !checkoutTasks.length) {
+    networkActivity = `正在启动 ${taskNames[currentRequest.operation]}…`;
+  } else if (currentTask) {
+    networkActivity = `${currentTask.state === "queued" ? "排队中" : "进行中"} · ${taskNames[currentTask.kind] || currentTask.kind}`;
+  } else if (refreshingStatus) {
+    networkActivity = "正在读取仓库状态…";
+  } else if (remoteCheck.isFetching) {
+    networkActivity = "正在检查远端更新…";
+  }
   checkRemoteUpdateRef.current = () => {
     if (
       !isDesktop ||
@@ -322,22 +367,13 @@ export default function Desktop() {
       checkout.plainDirectory ||
       !remote ||
       busy ||
-      status.isError
+      !status.data ||
+      status.data.detached ||
+      verifying
     )
       return;
     if (account?.status === "auth_required") return;
-    const key = `${checkout.id}:${remote}`;
-    const now = Date.now();
-    if ((remoteCheckTimes.current[key] || 0) + 10000 > now) return;
-    remoteCheckTimes.current[key] = now;
-    void api("CheckRemoteUpdate", checkout.id, remote)
-      .then((result) => {
-        if (!result) return;
-        setRemoteCheck((current) =>
-          result.remote === remote ? result : current,
-        );
-      })
-      .catch(() => {});
+    void client.fetchQuery(remoteCheckQuery).catch(() => {});
   };
   useEffect(() => {
     let off = () => {};
@@ -357,18 +393,11 @@ export default function Desktop() {
   }, [client]);
   useEffect(() => {
     if (!loading) checkRemoteUpdateRef.current();
-  }, [loading, checkout?.id, remote, busy]);
-  useEffect(() => {
-    setRemoteCheck(undefined);
-  }, [checkout?.id, remote]);
-  useEffect(() => {
-    setRemoteCheck(undefined);
-  }, [lastFetch]);
-  const tasks = [...ui.localTasks, ...st.tasks].sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+  }, [
+    loading, checkout?.id, remote, busy, lastNetworkTask?.id, verifying,
+    status.data?.branch, tracking?.branch, account?.id, account?.status,
+  ]);
   const toastTask = tasks.find((t) => t.id === ui.toastTaskId);
-  const activeTasks = tasks.filter((t) =>
-    ["queued", "running"].includes(t.state),
-  );
   const unreadTasks = tasks.filter((t) => ui.unreadTaskIds.includes(t.id));
   const unreadCount = unreadTasks.length;
   const unreadFailed = unreadTasks.some((t) => t.state === "failed");
@@ -382,17 +411,27 @@ export default function Desktop() {
     .join("，");
   const execute: Execute = async (fn) => {
     setError("");
-    setPending(true);
+    setPendingOperations((count) => count + 1);
     try {
       await fn();
     } catch (e) {
       setError(errorMessage(e));
     } finally {
-      setPending(false);
-      await client.invalidateQueries({ queryKey: ["state"] });
-      await client.invalidateQueries({ queryKey: ["git"] });
+      try {
+        await client.invalidateQueries({ queryKey: ["state"] }, { cancelRefetch: false });
+      } finally {
+        setPendingOperations((count) => count - 1);
+      }
     }
   };
+  const activeGitPath = useRef(st.settings.gitPath);
+  useEffect(() => {
+    if (loading) return;
+    if (activeGitPath.current !== st.settings.gitPath) {
+      activeGitPath.current = st.settings.gitPath;
+      void client.invalidateQueries({ queryKey: ["git"] });
+    }
+  }, [client, loading, st.settings.gitPath]);
   useEffect(() => {
     const media = window.matchMedia?.("(prefers-color-scheme: dark)");
     const apply = () => { document.documentElement.dataset.theme = theme === "system" ? (media?.matches ? "dark" : "light") : theme; };
@@ -408,21 +447,40 @@ export default function Desktop() {
   useEffect(() => {
     localStorage.setItem("repo-berth-wrap", String(wordWrap));
   }, [wordWrap]);
+  const refreshFinishedTask = useTaskUpdates(st.tasks, loading);
   useEffect(() => {
     let off = () => {};
     let live = true;
-    void onStateChanged(
-      () => void client.invalidateQueries({ queryKey: ["state"] }),
-      () => void client.invalidateQueries({ queryKey: ["git"] }),
-    ).then((f) => {
+    let refreshTimer: ReturnType<typeof setTimeout> | undefined;
+    let refreshing = false;
+    let queued = false;
+    const scheduleRefresh = () => {
+      if (!live || refreshing || refreshTimer !== undefined) return;
+      refreshTimer = setTimeout(async () => {
+        refreshTimer = undefined;
+        queued = false;
+        refreshing = true;
+        try {
+          await client.invalidateQueries({ queryKey: ["state"] }, { cancelRefetch: false });
+        } finally {
+          refreshing = false;
+          if (queued) scheduleRefresh();
+        }
+      }, 80);
+    };
+    void onStateChanged(() => {
+      queued = true;
+      scheduleRefresh();
+    }, refreshFinishedTask).then((f) => {
       if (live) off = f;
       else f();
     });
     return () => {
       live = false;
+      clearTimeout(refreshTimer);
       off();
     };
-  }, [client]);
+  }, [client, refreshFinishedTask]);
   useEffect(() => {
     if (!nativeMenubar) return;
     let off = () => {};
@@ -442,41 +500,7 @@ export default function Desktop() {
   }, [nativeMenubar]);
   useEffect(() => {
     useUI.getState().settleCommitDrafts(st.tasks);
-    if (!seenTasks.current) {
-      if (!loading)
-        seenTasks.current = new Set(
-          st.tasks
-            .filter((t) => !["queued", "running"].includes(t.state))
-            .map((t) => t.id),
-        );
-      return;
-    }
-    for (const t of st.tasks) {
-      if (
-        ["queued", "running"].includes(t.state) ||
-        seenTasks.current.has(t.id)
-      )
-        continue;
-      seenTasks.current.add(t.id);
-      if (t.state === "succeeded" && t.kind === "fetch")
-        setLastFetched((values) => ({ ...values, [t.target]: t.finishedAt }));
-    }
-  }, [st.tasks, ui.commitSubmissions, loading]);
-  useEffect(() => {
-    if (!notifiedTasks.current) {
-      if (!loading)
-        notifiedTasks.current = new Map(st.tasks.map((t) => [t.id, t.state]));
-      return;
-    }
-    for (const task of [...st.tasks].reverse()) {
-      const previous = notifiedTasks.current.get(task.id);
-      const completed = !["queued", "running"].includes(task.state);
-      if (previous === undefined || (completed && previous !== task.state)) {
-        useUI.getState().notifyTask(task);
-      }
-      notifiedTasks.current.set(task.id, task.state);
-    }
-  }, [st.tasks, loading]);
+  }, [st.tasks, ui.commitSubmissions]);
   useEffect(() => {
     if (!error) return;
     const now = new Date().toISOString();
@@ -522,7 +546,9 @@ export default function Desktop() {
     ui.set({ view: "repositories" });
   };
   const choose = (row: Row, id?: string, chosenRemote?: string) => {
-    setCopyID(id || row.checkouts[0]?.id || "");
+    const nextCheckout = id || row.checkouts[0]?.id || "";
+    if (nextCheckout !== (checkout?.id || "") && !canLeaveWorktree.current()) return false;
+    setCopyID(nextCheckout);
     if (chosenRemote && id)
       setRemoteChoices((v) => ({ ...v, [id]: chosenRemote }));
     ui.set({ selected: row.id, view: "repositories" });
@@ -531,13 +557,13 @@ export default function Desktop() {
     void api("MarkVisited", row.id).catch((e) => setError(errorMessage(e)));
     if (id && id !== row.id)
       void api("MarkVisited", id).catch((e) => setError(errorMessage(e)));
+    return true;
   };
   const openTarget = (target: string) => {
     const row = rows.find((r) => r.checkouts.some((c) => c.id === target));
-    if (row) {
+    if (row && choose(row, target)) {
       ui.set({ scope: "all", query: "" });
       setRepositorySearch("");
-      choose(row, target);
       ui.set({ tasksOpen: false });
     }
   };
@@ -557,8 +583,15 @@ export default function Desktop() {
     setCloneRequest(request);
     show("clone");
   };
-  const network = (operation: string) =>
-    void execute(() => api("GitNetwork", checkout!.id, remote, operation));
+  const network = async (operation: string) => {
+    if (!checkout || networkDisabled) return;
+    setNetworkRequest({ checkoutId: checkout.id, operation });
+    try {
+      await execute(() => api("GitNetwork", checkout.id, remote, operation));
+    } finally {
+      setNetworkRequest(undefined);
+    }
+  };
   const remoteSelect = checkout && (
     <select
       aria-label="选择 remote"
@@ -568,7 +601,7 @@ export default function Desktop() {
       }
     >
       <option value="" disabled>
-        请选择 remote
+        {remotes.length ? "请选择远端" : "未配置远端"}
       </option>
       {remotes.map((r) => (
         <option key={r.name}>{r.name}</option>
@@ -577,6 +610,28 @@ export default function Desktop() {
   );
   const action =
     behind && !ahead ? "pull" : ahead && !behind ? "push" : "fetch";
+  const networkTitle = !checkout
+    ? "远端操作"
+    : checkout.plainDirectory
+      ? "普通目录"
+      : remote
+        ? taskNames[action] + " " + remote
+        : remotes.length ? "请选择远端" : "未配置远端";
+  let networkStatus = networkActivity;
+  if (!networkStatus) {
+    if (status.isError && checkout && !checkout.plainDirectory) networkStatus = "状态读取失败";
+    else if (!checkout) networkStatus = "请先选择本地仓库";
+    else if (checkout.plainDirectory) networkStatus = "仅本地文件";
+    else if (status.data?.detached) networkStatus = "已分离 HEAD";
+    else if (!remote) networkStatus = remotes.length ? "在远端菜单中选择" : "在仓库设置中配置";
+    else if (account?.status === "auth_required") networkStatus = "需要重新授权";
+    else if (!account) networkStatus = "请选择访问账号";
+    else if (remoteHasUpdates) networkStatus = "远端有新提交";
+    else if (remoteCheck.isError) networkStatus = "远端更新检查失败";
+    else if (statusUpdated || lastFetch) {
+      networkStatus = (statusUpdated ? "状态更新 " : "上次获取 ") + formatSyncTime(statusUpdated || lastFetch);
+    } else networkStatus = "等待状态同步";
+  }
   const menuItems: Record<string, MenuNode[]> = {
     file: [
       {
@@ -827,10 +882,12 @@ export default function Desktop() {
     label: ReactNode,
     extra = "",
     disabled = false,
+    accessibleName?: string,
   ) => (
     <button
       disabled={disabled}
       className={extra}
+      aria-label={accessibleName}
       aria-expanded={popup === name}
       onClick={() => setPopup((p) => (p === name ? "" : name))}
     >
@@ -1060,23 +1117,18 @@ export default function Desktop() {
         </div>
         <div className="toolbar-unit network-unit" data-desktop-popup>
           <button disabled={networkDisabled} onClick={() => network(action)}>
-            {action === "pull" ? (
+            {networkActivity ? (
+              <RefreshCw size={20} className="network-spinner" aria-hidden="true" />
+            ) : action === "pull" ? (
               <ArrowDown size={20} />
             ) : action === "push" ? (
               <ArrowUp size={20} />
             ) : (
-              <RefreshCw size={20} className={busy ? "spinning" : ""} />
+              <RefreshCw size={20} />
             )}
             <span>
               <span className="network-title">
-                <strong>
-                  {action === "fetch"
-                    ? "Fetch"
-                    : action === "pull"
-                      ? "Pull"
-                      : "Push"}{" "}
-                  {remote || "remote"}
-                </strong>
+                <strong>{networkTitle}</strong>
                 {(ahead > 0 || behind > 0) && (
                   <span className="sync-pill">
                     {ahead > 0 && <span className="sync-ahead">↑{ahead}</span>}
@@ -1085,35 +1137,35 @@ export default function Desktop() {
                     )}
                   </span>
                 )}
-                {remoteHasUpdates && (
+                {remoteHasUpdates && !networkActivity && (
                   <span
                     className="remote-update-dot"
                     title="远端有新提交，可 Fetch 查看"
                   />
                 )}
               </span>
-              {busy ? (
-                <small>执行中…</small>
-              ) : status.isError ? (
-                <small>状态读取失败</small>
-              ) : remoteHasUpdates ? (
-                <small>
-                  远端有新提交 · {formatSyncTime(statusUpdated || lastFetch)}
-                </small>
-              ) : statusUpdated || lastFetch ? (
-                <small>
-                  {statusUpdated ? "状态更新" : "上次获取"}{" "}
-                  {formatSyncTime(statusUpdated || lastFetch)}
-                </small>
-              ) : (
-                <small>等待状态同步</small>
-              )}
+              <small aria-live="polite">{networkStatus}</small>
             </span>
           </button>
-          {popupButton("network", <ChevronDown size={14} />, "network-more")}
+          {popupButton(
+            "network", <ChevronDown size={14} />, "network-more",
+            !checkout || !!checkout.plainDirectory, "更多远端操作",
+          )}
           {popup === "network" && (
             <div className="desktop-popover menu-popover">
-              {["fetch", "pull", "push"].map((op) => (
+              {(remotes.length > 1 || (!remote && remotes.length > 0)) && (
+                <Field label="远端">{remoteSelect}</Field>
+              )}
+              {!remote && !remotes.length && (
+                <button onClick={() => show("repository")}>仓库设置</button>
+              )}
+              {account?.status === "auth_required" && (
+                <button onClick={() => show("accounts")}>管理账号授权</button>
+              )}
+              {remote && !account && (
+                <button onClick={() => show("binding")}>配置访问账号</button>
+              )}
+              {remote && ["fetch", "pull", "push"].map((op) => (
                 <button
                   key={op}
                   disabled={networkDisabled}
@@ -1384,6 +1436,7 @@ export default function Desktop() {
           execute={execute}
           configure={() => show("repository")}
           accountSettings={() => show("accounts")}
+          canLeaveRef={canLeaveWorktree}
           openRepository={() =>
             void execute(() => api("OpenRepository", selected!.id))
           }
@@ -1556,6 +1609,7 @@ export default function Desktop() {
           execute={execute}
           onClose={closePanel}
           onImported={(rowID, id) => {
+            if ((id || rowID) !== checkout?.id && !canLeaveWorktree.current()) return;
             ui.set({ selected: rowID, view: "repositories" });
             setCopyID(id || rowID);
             setTab("changes");
@@ -1608,7 +1662,7 @@ export default function Desktop() {
             <Field label="本地副本">
               <select
                 value={checkout.id}
-                onChange={(e) => setCopyID(e.target.value)}
+                onChange={(e) => { if (canLeaveWorktree.current()) setCopyID(e.target.value); }}
               >
                 {selected?.checkouts.map((c) => (
                   <option value={c.id} key={c.id}>
@@ -1644,6 +1698,9 @@ export default function Desktop() {
                     return p ? `${p.name} <${p.email}>` : "未确认";
                   })()}
                 </p>
+                {selected?.repository && account && !st.access.some((entry) =>
+                  entry.repositoryId === selected.repository?.id && entry.accountId === account.id
+                ) && <p className="muted" role="status">最近的同步列表中没有此仓库，仍可使用当前本地副本。</p>}
                 <button
                   disabled={!remote || verifying}
                   onClick={() => show("binding")}
@@ -1683,7 +1740,7 @@ export default function Desktop() {
         </Modal>
       )}
       {panel === "local-management" && (
-        <LocalManagement st={st} execute={execute} onClose={closePanel} />
+        <LocalManagement st={st} execute={execute} onClose={closePanel} canForget={(id) => id !== checkout?.id || canLeaveWorktree.current()} />
       )}
       {panel === "share" && checkout && (
         <Modal title="分享到 GitHub" onClose={closePanel}>
@@ -1700,20 +1757,21 @@ export default function Desktop() {
       )}
       {panel === "forget" && checkout && (
         <Modal title="将此本地副本移出管理？" onClose={closePanel}>
-          <p>只移除应用记录和绑定，不删除文件或 Git 历史。</p>
+          <p>将移除应用记录和账号绑定。磁盘文件和 Git 历史会保留。</p>
           <p className="path-text">{checkout.path}</p>
           <div className="form-actions">
             <button onClick={closePanel}>取消</button>
             <button
               disabled={busy}
-              onClick={() =>
+              onClick={() => {
+                if (!canLeaveWorktree.current()) return;
                 void execute(async () => {
                   await api("ForgetCheckout", checkout.id);
                   setCopyID("");
                   ui.set({ selected: "" });
                   closePanel();
-                })
-              }
+                });
+              }}
             >
               移出管理
             </button>

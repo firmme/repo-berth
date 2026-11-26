@@ -4,10 +4,11 @@ import { api, errorMessage } from "./api";
 import { Modal, Field, DirectoryField } from "./components";
 import type { State, Task } from "./types";
 import type { Execute } from "./catalog";
-const taskNames: Record<string, string> = {
+export const taskNames: Record<string, string> = {
   authorize: "账号授权",
   sync: "同步仓库",
   clone: "克隆仓库",
+  share: "发布仓库",
   scan: "扫描目录",
   fetch: "Fetch",
   pull: "Pull",
@@ -129,41 +130,6 @@ export function ImportModal({
           <button className="primary" disabled={!path}>
             {confirmPlain ? "继续添加普通目录" : "开始导入"}
           </button>
-        </div>
-      </form>
-    </Modal>
-  );
-}
-export function GroupModal({
-  execute,
-  onClose,
-}: {
-  execute: Execute;
-  onClose: () => void;
-}) {
-  const [name, setName] = useState("");
-  return (
-    <Modal title="新建仓库分组" onClose={onClose}>
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          void execute(async () => {
-            await api("SaveGroup", { id: "", name, members: [] });
-            onClose();
-          });
-        }}
-      >
-        <Field label="分组名称">
-          <input
-            autoFocus
-            required
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="例如：工作项目"
-          />
-        </Field>
-        <div className="form-actions">
-          <button className="primary">创建分组</button>
         </div>
       </form>
     </Modal>

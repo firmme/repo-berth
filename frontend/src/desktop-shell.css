@@ -227,6 +227,15 @@
 .network-unit > button:first-child {
   padding-right: 5px;
 }
+.network-spinner {
+  animation: spin 1s linear infinite;
+  color: #79c0ff;
+}
+@media (prefers-reduced-motion: reduce) {
+  .network-spinner {
+    animation: none;
+  }
+}
 .network-unit .network-more {
   width: 30px;
   padding: 0;
@@ -343,6 +352,9 @@
   color: var(--muted);
   font-size: 11px;
   line-height: 1.6;
+}
+.network-unit .menu-popover .field {
+  padding: 8px 12px 4px;
 }
 .network-unit .menu-popover {
   width: 260px;

@@ -67,6 +67,13 @@ func (r Runner) lineEndingDiff(ctx context.Context, path string, staged bool) (s
 	}
 	// --ignore-cr-at-eol also suppresses some final-newline differences. Only
 	// hide files whose bytes actually match after CRLF -> LF conversion.
+	var workingRoot *os.Root
+	if !staged && len(ignored) > 0 {
+		if root, err := os.OpenRoot(path); err == nil {
+			workingRoot = root
+			defer workingRoot.Close()
+		}
+	}
 	for file := range ignored {
 		base := ":" + file
 		if staged {
@@ -86,7 +93,16 @@ func (r Runner) lineEndingDiff(ctx context.Context, path string, staged bool) (s
 			}
 			after = []byte(text)
 		} else {
-			f, err := os.Open(filepath.Join(path, filepath.FromSlash(file)))
+			if workingRoot == nil || ValidFile(file) != nil {
+				delete(ignored, file)
+				continue
+			}
+			name := filepath.FromSlash(file)
+			if info, err := workingRoot.Lstat(name); err != nil || !info.Mode().IsRegular() {
+				delete(ignored, file)
+				continue
+			}
+			f, err := workingRoot.Open(name)
 			if err != nil {
 				delete(ignored, file)
 				continue

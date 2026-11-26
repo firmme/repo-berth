@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode, type MouseEvent as ReactMouseEvent } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject, type ReactNode, type MouseEvent as ReactMouseEvent } from "react";
 import { createPortal } from "react-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -48,6 +48,8 @@ import {
   Eye,
   WrapText,
   Save,
+  Undo2,
+  RotateCcw,
 } from "lucide-react";
 import { api, errorMessage } from "./api";
 import { useUI } from "./ui";
@@ -63,6 +65,7 @@ import type {
   State,
   WorkingFileInfo,
   WorkingFilePreview,
+  RecoveryRequest,
 } from "./types";
 import type { Execute, Row } from "./catalog";
 import {
@@ -73,7 +76,7 @@ import {
   Loading,
   Modal,
 } from "./components";
-import { DiffViewer, SplitDiffView, diffChangeKind, diffStats } from "./diff-view";
+import { DiffViewer, SplitDiffView, diffStats } from "./diff-view";
 import {
   BinaryDiffPane,
   CommitMediaPreview,
@@ -98,6 +101,9 @@ import {
 import { BranchTreeView } from "./branch-tree";
 import { commitPills } from "./commit-labels";
 import { FileContextMenu } from "./file-context-menu";
+import { GitRecoveryModal } from "./git-recovery";
+import { refreshWorkingQueries } from "./git-refresh";
+import { useCommitHistory } from "./commit-history";
 import { detectLanguage, highlightCode, type LanguageId } from "./highlight";
 
 export function Worktree({
@@ -118,6 +124,7 @@ export function Worktree({
   configure,
   accountSettings,
   openRepository,
+  canLeaveRef,
 }: {
   checkout: Checkout;
   state: State;
@@ -136,8 +143,10 @@ export function Worktree({
   configure: () => void;
   accountSettings: () => void;
   openRepository: () => void;
+  canLeaveRef: RefObject<() => boolean>;
 }) {
   const client = useQueryClient();
+  const [recovery, setRecovery] = useState<RecoveryRequest>();
   const [filter, setFilter] = useState(""),
     [fileView, setFileView] = useState<"changes" | "all">("changes"),
     [selected, setSelected] = useState<{ path: string; staged: boolean }>(),
@@ -158,6 +167,7 @@ export function Worktree({
     [editing, setEditing] = useState(""),
     [editorText, setEditorText] = useState(""),
     [editorOriginal, setEditorOriginal] = useState(""),
+    [editorVersion, setEditorVersion] = useState(""),
     [editorLoading, setEditorLoading] = useState(false),
     [editorSaving, setEditorSaving] = useState(false),
     [editorError, setEditorError] = useState(""),
@@ -301,10 +311,13 @@ export function Worktree({
   }, [tree, c.id, fileView]);
   const expandAllTree = () => setExpandedFolders(new Set(allFolderPaths));
   const collapseAllTree = () => setExpandedFolders(new Set());
+  const hasUnsavedEditor = !!editing && editorText !== editorOriginal;
   const confirmDiscard = () =>
-    !editing ||
-    editorText === editorOriginal ||
-    window.confirm("未保存的修改将丢失，继续？");
+    !editorSaving && (!hasUnsavedEditor || window.confirm("丢弃未保存的编辑？"));
+  useLayoutEffect(() => {
+    canLeaveRef.current = confirmDiscard;
+    return () => { canLeaveRef.current = () => true; };
+  }, [canLeaveRef, hasUnsavedEditor, editorSaving]);
   const selectFile = (f: FileStatus) => {
     if (!confirmDiscard()) return;
     setEditing("");
@@ -338,13 +351,14 @@ export function Worktree({
   const openEditor = async (path: string) => {
     setMenu(undefined);
     setEditorError("");
-    if (editing === path) return;
+    if ((editing === path && !editorError) || editorLoading) return;
     if (!confirmDiscard()) return;
     setEditorLoading(true);
     try {
-      const content = await api("GitFileContent", c.id, path);
-      setEditorText(content);
-      setEditorOriginal(content);
+      const document = await api("ReadWorkingDocument", c.id, path);
+      setEditorText(document.content);
+      setEditorOriginal(document.content);
+      setEditorVersion(document.version);
       setCursorLine(1);
       setEditing(path);
       setPreviewPath("");
@@ -358,6 +372,7 @@ export function Worktree({
     } catch (e) {
       setEditorText("");
       setEditorOriginal("");
+      setEditorVersion("");
       setEditorError(errorMessage(e));
       if (errorMessage(e).includes("二进制")) {
         setEditing("");
@@ -370,28 +385,21 @@ export function Worktree({
     }
   };
   const saveEditor = async () => {
-    if (!editing) return;
+    if (!editing || !editorVersion || editorSaving) return;
     setEditorSaving(true);
     setEditorError("");
     try {
-      await api("SaveWorkingFile", c.id, editing, editorText);
+      const version = await api("SaveWorkingDocument", c.id, editing, editorText, editorVersion);
+      setEditorVersion(version);
       setEditorOriginal(editorText);
-      await client.invalidateQueries({ queryKey: ["state"] });
-      await client.invalidateQueries({ queryKey: ["git", "file-info", c.id] });
-      await client.invalidateQueries({ queryKey: ["git", "status", c.id] });
-      await client.invalidateQueries({ queryKey: ["git", "diff", c.id] });
+      await refreshWorkingTree();
     } catch (e) {
       setEditorError(errorMessage(e));
     } finally {
       setEditorSaving(false);
     }
   };
-  const refreshWorkingTree = async () => {
-    await client.invalidateQueries({ queryKey: ["git", "status", c.id] });
-    await client.invalidateQueries({ queryKey: ["git", "files", c.id] });
-    await client.invalidateQueries({ queryKey: ["git", "diff", c.id] });
-    await client.invalidateQueries({ queryKey: ["git", "file-info", c.id] });
-  };
+  const refreshWorkingTree = () => refreshWorkingQueries(client, c.id);
   const startCreate = (base: string, kind: "file" | "dir") => {
     setMenu(undefined);
     setNewItemKind(kind);
@@ -506,6 +514,11 @@ export function Worktree({
       (node.file ? [node.file] : flattenTree(node)).filter(isChanged),
       next,
     );
+  };
+  const discardNode = (node: FileTreeNode) => {
+    setMenu(undefined);
+    if (busy || stagingPaths.size || editorSaving) return;
+    setRecovery({ kind: "discard", paths: node.path ? [node.path] : [], all: !node.path, includeUntracked: !node.isDir && node.file?.index === "?", target: "", mode: "mixed" });
   };
   const nodeStaged = (node: FileTreeNode) => {
     const targets = (node.file ? [node.file] : flattenTree(node)).filter(
@@ -751,107 +764,10 @@ export function Worktree({
       activeFilteredStats.insertions -
       activeFilteredStats.deletions,
   );
-  const history = useQuery({
-    queryKey: ["git", "history", c.id],
-    queryFn: () => api("GitHistory", c.id),
-    enabled: tab === "history",
-  });
-  const commit = history.data?.find((item) => item.hash === commitHash);
-  const commitDiff = useQuery({
-    queryKey: ["git", "commit-diff", c.id, commit?.hash],
-    queryFn: () => api("GitCommitDiff", c.id, commit!.hash),
-    enabled: tab === "history" && !!commit,
-  });
-  const commitDiffFiltered = useQuery({
-    queryKey: ["git", "commit-diff-filtered", c.id, commit?.hash],
-    queryFn: () => api("GitCommitDiffFiltered", c.id, commit!.hash),
-    enabled: tab === "history" && !!commit,
-  });
-  const historyFiles = useMemo(() => {
-    const chunks = (commitDiff.data || "")
-      .split(/(?=^diff --git )/m)
-      .filter((chunk) => chunk.startsWith("diff --git "));
-    return chunks
-      .map((diff) => ({
-        path: (() => {
-          const header =
-            /^diff --git (?:"a\/.*" "b\/([^"]+)"|a\/.* b\/(.*))$/m.exec(diff);
-          return header?.[1] || header?.[2] || "未知文件";
-        })(),
-        diff,
-        kind: diffChangeKind(diff),
-        ...diffStats(diff),
-      }))
-      .sort((a, b) => a.path.localeCompare(b.path));
-  }, [commitDiff.data]);
-  const historyFilteredFiles = useMemo(() => {
-    const chunks = (commitDiffFiltered.data || "")
-      .split(/(?=^diff --git )/m)
-      .filter((chunk) => chunk.startsWith("diff --git "));
-    return chunks
-      .map((diff) => ({
-        path: (() => {
-          const header =
-            /^diff --git (?:"a\/.*" "b\/([^"]+)"|a\/.* b\/(.*))$/m.exec(diff);
-          return header?.[1] || header?.[2] || "未知文件";
-        })(),
-        diff,
-      }))
-      .sort((a, b) => a.path.localeCompare(b.path));
-  }, [commitDiffFiltered.data]);
-  const historyRawFile = historyFile
-    ? historyFiles.find((item) => item.path === historyFile)
-    : undefined;
-  const historyDisplayText = historyFile
-    ? historyFilteredFiles.find((item) => item.path === historyFile)?.diff ||
-      ""
-    : commitDiffFiltered.data || "";
-  const historyRawStats = historyRawFile
-    ? {
-        additions: historyRawFile.insertions,
-        deletions: historyRawFile.deletions,
-      }
-    : {
-        additions: commit?.insertions || 0,
-        deletions: commit?.deletions || 0,
-      };
-  const historyFilteredStats = diffStats(historyDisplayText);
-  const historyIgnored = Math.max(
-    0,
-    historyRawStats.additions +
-      historyRawStats.deletions -
-      historyFilteredStats.insertions -
-      historyFilteredStats.deletions,
-  );
-  const historyFileInfo = useQuery({
-    queryKey: ["git", "commit-file-info", c.id, commit?.hash, historyFile],
-    queryFn: () =>
-      api("GitCommitFileInfo", c.id, commit!.hash, historyFile),
-    enabled: tab === "history" && !!commit && !!historyFile,
-  });
-  const historyMedia = useQuery({
-    queryKey: ["git", "commit-file-preview", c.id, commit?.hash, historyFile],
-    queryFn: () =>
-      api("GitCommitFilePreview", c.id, commit!.hash, historyFile),
-    enabled:
-      tab === "history" &&
-      !!commit &&
-      !!historyFile &&
-      ["image", "audio", "video"].includes(
-        historyFileInfo.data?.previewKind || "",
-      ) &&
-      !historyFileInfo.data?.tooLarge,
-  });
-  const historyBinary = useQuery({
-    queryKey: ["git", "commit-binary-diff", c.id, commit?.hash, historyFile],
-    queryFn: () =>
-      api("GitCommitBinaryDiff", c.id, commit!.hash, historyFile),
-    enabled:
-      tab === "history" &&
-      !!commit &&
-      !!historyFile &&
-      historyFileInfo.data?.previewKind === "unsupported",
-  });
+  const {
+    history, commit, commitDiff, commitDiffFiltered, historyFiles, historyRawFile,
+    historyDisplayText, historyRawStats, historyIgnored, historyFileInfo, historyMedia, historyBinary,
+  } = useCommitHistory(c.id, tab === "history", commitHash, historyFile);
   const account = st.accounts.find((a) => a.id === accountID),
     profile = effectiveCommitIdentity(
       st,
@@ -961,9 +877,10 @@ export function Worktree({
         await api("SetWorkingFileFormat", c.id, infoPath, encoding, lineEnding);
         await refreshWorkingTree();
         if (editing) {
-          const content = await api("GitFileContent", c.id, editing);
-          setEditorText(content);
-          setEditorOriginal(content);
+          const document = await api("ReadWorkingDocument", c.id, editing);
+          setEditorText(document.content);
+          setEditorOriginal(document.content);
+          setEditorVersion(document.version);
         }
       } finally {
         setFormatBusy(false);
@@ -1082,6 +999,7 @@ export function Worktree({
                     ? `${files.length} 个变更文件`
                     : "正在读取变更…"}
               </span>
+              <button className="tree-toggle-button" title="丢弃全部未提交修改" aria-label="丢弃全部未提交修改" disabled={busy || !!statusError || !status || stagingPaths.size > 0 || editorSaving} onClick={() => setRecovery({ kind: "discard", paths: [], all: true, includeUntracked: false, target: "", mode: "mixed" })}><Undo2 size={13} /></button>
               <button
                 type="button"
                 className="new-file-button"
@@ -1301,6 +1219,7 @@ export function Worktree({
                 <GitCommitHorizontal size={16} />
                 <strong>{commit.subject}</strong>
                 <code>{commit.hash.slice(0, 7)}</code>
+                <button disabled={busy || stagingPaths.size > 0 || editorSaving} onClick={() => setRecovery({ kind: "reset", paths: [], all: false, includeUntracked: false, target: commit.hash, mode: "mixed" })}><RotateCcw size={14} />重置到此提交…</button>
                 {(!historyFile ||
                   historyFileInfo.data?.previewKind === "text") && (
                   <button
@@ -1594,6 +1513,7 @@ export function Worktree({
               <button
                 className="diff-edit-button"
                 disabled={!editable(file)}
+                aria-label="在应用中编辑文件"
                 title={editable(file) ? "在应用中编辑文件" : "该文件不可编辑"}
                 onClick={() => void openEditor(activeFile.path)}
               >
@@ -1742,12 +1662,26 @@ export function Worktree({
           </div>
         </Modal>
       )}
+      {recovery && <GitRecoveryModal
+        checkout={c}
+        initialRequest={recovery}
+        unsavedEditor={hasUnsavedEditor ? editing : undefined}
+        onClose={() => setRecovery(undefined)}
+        onApplied={async (plan, request) => {
+          if ((request.kind === "reset" && request.mode === "hard") || (request.kind === "discard" && (request.all || plan.files.some((f) => f.path === editing)))) {
+            setEditing(""); setEditorText(""); setEditorOriginal(""); setEditorVersion(""); setEditorError("");
+          }
+          setSelected(undefined); setPreviewPath(""); setStageOverrides({});
+          await refreshWorkingQueries(client, c.id, true);
+        }}
+      />}
       <FileContextMenu
         menu={menu}
         setMenu={setMenu}
         rootPath={c.path}
         clipboard={clipboard}
         stageNode={stageNode}
+        discardNode={discardNode}
         nodeStaged={nodeStaged}
         ignoreNode={ignoreNode}
         forceTrackNode={forceTrackNode}

@@ -312,7 +312,7 @@ try {
   await textButton("文件");
   assert(
     await evaluate(
-      `Array.from(document.querySelectorAll('.menu-popover > button')).every(b=>{const range=document.createRange();range.selectNodeContents(b);return getComputedStyle(b).justifyContent==='flex-start' && range.getBoundingClientRect().left-b.getBoundingClientRect().left<20})`,
+      `(()=>{const buttons=[...document.querySelectorAll('.menu-popover > button')];return buttons.length>0 && buttons.every(b=>{const range=document.createRange();range.selectNodeContents(b);const offset=range.getBoundingClientRect().left-b.getBoundingClientRect().left;return offset>=0 && offset<20})})()`,
     ),
     "Menu labels are not left aligned",
   );

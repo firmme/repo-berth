@@ -157,6 +157,10 @@ func quoteShell(s string) string {
 	return "'" + strings.ReplaceAll(filepath.ToSlash(s), "'", "'\\''") + "'"
 }
 func (r Runner) Run(ctx context.Context, dir string, auth *Auth, config []string, args ...string) (string, error) {
+	return r.runInput(ctx, dir, auth, config, "", args...)
+}
+
+func (r Runner) runInput(ctx context.Context, dir string, auth *Auth, config []string, input string, args ...string) (string, error) {
 	base := []string{"-c", "core.quotepath=false", "-c", "color.ui=false", "-c", "credential.helper=", "-c", "http.followRedirects=false", "-c", "protocol.file.allow=never", "-c", "protocol.ext.allow=never", "-c", "core.fsmonitor=false"}
 	for _, setting := range r.lineEndingConfig(ctx, dir) {
 		base = append(base, "-c", setting)
@@ -192,6 +196,9 @@ func (r Runner) Run(ctx context.Context, dir string, auth *Auth, config []string
 		cmd := exec.CommandContext(ctx, binary, base...)
 		cmd.Dir = dir
 		cmd.Env = env
+		if input != "" {
+			cmd.Stdin = strings.NewReader(input)
+		}
 		cmd.WaitDelay = 3 * time.Second
 		hideWindow(cmd)
 		var stdout, stderr cappedBuffer
@@ -291,8 +298,9 @@ func (r Runner) Root(ctx context.Context, path string) (string, error) {
 }
 
 type RemoteHead struct {
-	Branch string `json:"branch"`
-	Head   string `json:"head"`
+	Branch      string `json:"branch"`
+	Head        string `json:"head"`
+	TrackingRef string `json:"-"`
 }
 
 func (r Runner) Remotes(ctx context.Context, path string) ([]Remote, error) {
@@ -380,11 +388,10 @@ func (r Runner) RemoteHead(ctx context.Context, path, remote string, auth *Auth)
 	if _, err = GitHubTarget(url); err != nil {
 		return RemoteHead{}, err
 	}
-	branch, err := r.Run(ctx, path, nil, nil, "symbolic-ref", "--short", "-q", "HEAD")
+	branch, ref, err := r.networkTarget(ctx, path, remote)
 	if err != nil {
-		return RemoteHead{}, model.Err("DETACHED_HEAD", "当前处于分离 HEAD 状态，请先切换到本地分支")
+		return RemoteHead{}, err
 	}
-	branch = strings.TrimSpace(branch)
 	var credentials *Auth
 	if auth != nil && auth.Login != "" && auth.Token != "" {
 		copied := *auth
@@ -399,7 +406,7 @@ func (r Runner) RemoteHead(ctx context.Context, path, remote string, auth *Auth)
 	if len(fields) < 2 {
 		return RemoteHead{}, model.Err("REMOTE_BRANCH_MISSING", "远端没有当前分支")
 	}
-	return RemoteHead{Branch: branch, Head: fields[0]}, nil
+	return RemoteHead{Branch: branch, Head: fields[0], TrackingRef: ref}, nil
 }
 func embeddedCredentials(raw string) bool {
 	u, err := url.Parse(raw)
@@ -445,18 +452,16 @@ func (r Runner) Status(ctx context.Context, path string) (Status, error) {
 	if s.Detached || s.Branch == "" {
 		return s, nil
 	}
+	target := r.branchUpstream(ctx, path, s.Branch)
 	for _, remote := range s.Remotes {
-		ref := "refs/remotes/" + remote.Name + "/" + s.Branch
-		if _, err := r.Run(ctx, path, nil, nil, "rev-parse", "--verify", "--quiet", ref); err != nil {
-			continue
-		}
+		branch, ref := target.forRemote(remote.Name, s.Branch)
 		counts, err := r.Run(ctx, path, nil, nil, "rev-list", "--left-right", "--count", "HEAD..."+ref)
 		if err != nil {
 			continue
 		}
 		var ahead, behind int
 		_, _ = fmt.Sscanf(counts, "%d\t%d", &ahead, &behind)
-		s.Tracking = append(s.Tracking, RemoteTracking{Remote: remote.Name, Branch: s.Branch, Ahead: ahead, Behind: behind})
+		s.Tracking = append(s.Tracking, RemoteTracking{Remote: remote.Name, Branch: branch, Ahead: ahead, Behind: behind})
 	}
 	return s, nil
 }
@@ -479,6 +484,15 @@ func ParseStatus(out string) []FileStatus {
 }
 
 func applyNumstat(files []FileStatus, raw string, staged bool) {
+	byPath := make(map[string]*FileStatus, len(files))
+	for i := range files {
+		file := &files[i]
+		for _, name := range []string{file.Path, file.OriginalPath} {
+			if name != "" && byPath[name] == nil {
+				byPath[name] = file
+			}
+		}
+	}
 	parts := strings.Split(raw, "\x00")
 	for i := 0; i < len(parts); i++ {
 		row := parts[i]
@@ -500,18 +514,12 @@ func applyNumstat(files []FileStatus, raw string, staged bool) {
 			i += 2
 			path = parts[i]
 		}
-		for j := range files {
-			if files[j].Path != path && files[j].OriginalPath != path {
-				continue
-			}
+		if file := byPath[path]; file != nil {
 			if staged {
-				files[j].IndexAdditions = additions
-				files[j].IndexDeletions = deletions
+				file.IndexAdditions, file.IndexDeletions = additions, deletions
 			} else {
-				files[j].WorktreeAdditions = additions
-				files[j].WorktreeDeletions = deletions
+				file.WorktreeAdditions, file.WorktreeDeletions = additions, deletions
 			}
-			break
 		}
 	}
 }
@@ -632,7 +640,8 @@ func ValidFile(path string) error {
 		return model.Err("INVALID_PATH", "文件路径无效")
 	}
 	for _, p := range strings.Split(filepath.ToSlash(path), "/") {
-		if p == ".." || p == ".git" {
+		if p == ".." || strings.EqualFold(p, ".git") ||
+			(runtime.GOOS == "windows" && (strings.Contains(p, ":") || p != strings.TrimRight(p, " ."))) {
 			return model.Err("INVALID_PATH", "文件路径不能越过工作区或指向 Git 元数据")
 		}
 	}
@@ -782,13 +791,13 @@ func (r Runner) Network(ctx context.Context, path, operation, remote string, aut
 	case "fetch":
 		args = []string{"fetch", "--progress", remote}
 	case "pull":
-		branch, err := r.networkBranch(ctx, path, remote)
+		branch, _, err := r.networkTarget(ctx, path, remote)
 		if err != nil {
 			return err
 		}
 		args = []string{"pull", "--ff-only", "--no-rebase", remote, branch}
 	case "push":
-		branch, err := r.networkBranch(ctx, path, remote)
+		branch, _, err := r.networkTarget(ctx, path, remote)
 		if err != nil {
 			return err
 		}
@@ -837,20 +846,39 @@ func (r Runner) Clone(ctx context.Context, url, dest string, auth Auth) error {
 	}
 	return nil
 }
-func (r Runner) networkBranch(ctx context.Context, path, remote string) (string, error) {
+func (r Runner) networkTarget(ctx context.Context, path, remote string) (string, string, error) {
 	current, err := r.Run(ctx, path, nil, nil, "symbolic-ref", "--short", "-q", "HEAD")
 	if err != nil {
-		return "", model.Err("DETACHED_HEAD", "当前处于分离 HEAD 状态，请先切换到本地分支")
+		return "", "", model.Err("DETACHED_HEAD", "当前处于分离 HEAD 状态，请先切换到本地分支")
 	}
 	current = strings.TrimSpace(current)
-	info, err := r.Run(ctx, path, nil, nil, "for-each-ref", "--format=%(upstream:remotename)%00%(upstream:remoteref)", "refs/heads/"+current)
+	branch, ref := r.branchUpstream(ctx, path, current).forRemote(remote, current)
+	return branch, ref, nil
+}
+
+type branchUpstream struct {
+	remote, branch, trackingRef string
+}
+
+func (r Runner) branchUpstream(ctx context.Context, path, branch string) branchUpstream {
+	info, err := r.Run(ctx, path, nil, nil, "for-each-ref", "--count=1", "--format=%(upstream:remotename)%00%(upstream:remoteref)%00%(upstream)", "refs/heads/"+branch)
 	if err == nil {
-		parts := strings.SplitN(strings.TrimSpace(info), "\x00", 2)
-		if len(parts) == 2 && parts[0] == remote && strings.HasPrefix(parts[1], "refs/heads/") {
-			return strings.TrimPrefix(parts[1], "refs/heads/"), nil
+		parts := strings.SplitN(strings.TrimSpace(info), "\x00", 3)
+		if len(parts) == 3 && strings.HasPrefix(parts[1], "refs/heads/") {
+			return branchUpstream{parts[0], strings.TrimPrefix(parts[1], "refs/heads/"), parts[2]}
 		}
 	}
-	return current, nil
+	return branchUpstream{}
+}
+
+func (target branchUpstream) forRemote(remote, branch string) (string, string) {
+	if target.remote == remote && target.branch != "" {
+		branch = target.branch
+		if target.trackingRef != "" {
+			return branch, target.trackingRef
+		}
+	}
+	return branch, "refs/remotes/" + remote + "/" + branch
 }
 func Canonical(path string) (string, error) {
 	p, err := filepath.Abs(path)

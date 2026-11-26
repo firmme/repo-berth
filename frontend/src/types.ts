@@ -213,6 +213,22 @@ export interface GitStatus {
   tracking?: RemoteTracking[];
   detached: boolean;
 }
+export interface RecoveryRequest {
+  kind: "discard" | "reset";
+  paths: string[];
+  all: boolean;
+  includeUntracked: boolean;
+  target: string;
+  mode: "soft" | "mixed" | "hard";
+}
+export interface RecoveryPlan {
+  head: string;
+  target: string;
+  branch: string;
+  commits: number;
+  files: { path: string; action: "restore" | "delete" | "change" }[];
+  fingerprint: string;
+}
 export interface Commit {
   hash: string;
   author: string;

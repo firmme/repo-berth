@@ -126,10 +126,12 @@ export function LocalManagement({
   st,
   execute,
   onClose,
+  canForget = () => true,
 }: {
   st: State;
   execute: Execute;
   onClose: () => void;
+  canForget?: (id: string) => boolean;
 }) {
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<Checkout>();
@@ -173,6 +175,7 @@ export function LocalManagement({
           <div className="form-actions">
             <button disabled={pending} onClick={() => setSelected(undefined)}>取消</button>
             <button disabled={pending || busy(selected.id)} onClick={() => {
+              if (!canForget(selected.id)) return;
               setPending(true);
               void execute(() => api("ForgetCheckout", selected.id)).then(() => setSelected(undefined)).finally(() => setPending(false));
             }}>确认移出管理</button>

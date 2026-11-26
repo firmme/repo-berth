@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -90,19 +89,24 @@ func (s *Service) CheckLineEndingRisks(id string, files []string) ([]LineEndingR
 	if err != nil {
 		return nil, err
 	}
+	root, err := os.OpenRoot(c.Path)
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close()
 	risks := []LineEndingRisk{}
 	for _, file := range files {
 		info := attrs[file]
 		if info.text == "unset" {
 			continue
 		}
-		full, err := workingFilePath(c.Path, file)
+		full, err := workingFilePath(root, file)
 		if err != nil {
 			return nil, err
 		}
-		data, err := os.ReadFile(full)
+		data, err := readWorkingBytes(root, full, 20<<20)
 		if err != nil {
-			if os.IsNotExist(err) {
+			if appErr, _ := err.(*model.AppError); os.IsNotExist(err) || (appErr != nil && appErr.Code == "FILE_TOO_LARGE") {
 				continue
 			}
 			return nil, model.Err("READ_FAILED", "无法读取文件，请检查权限")
@@ -170,16 +174,24 @@ func (s *Service) FixLineEndings(id string, files []string) error {
 			return model.Err("UNSTAGED_CHANGES", "文件还有未暂存修改，请先处理这些改动，或选择原样提交")
 		}
 	}
+	root, err := os.OpenRoot(c.Path)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
 	changes := []string{}
 	for _, file := range files {
 		info := attrs[file]
 		if info.text == "unset" {
 			continue
 		}
-		full := filepath.Join(c.Path, filepath.FromSlash(file))
-		data, err := os.ReadFile(full)
+		full, err := workingFilePath(root, file)
 		if err != nil {
-			if os.IsNotExist(err) {
+			return err
+		}
+		data, err := readWorkingBytes(root, full, 20<<20)
+		if err != nil {
+			if appErr, _ := err.(*model.AppError); os.IsNotExist(err) || (appErr != nil && appErr.Code == "FILE_TOO_LARGE") {
 				continue
 			}
 			return model.Err("READ_FAILED", "无法读取文件，请检查权限")
@@ -195,7 +207,7 @@ func (s *Service) FixLineEndings(id string, files []string) error {
 		if text == string(data) {
 			continue
 		}
-		if err := os.WriteFile(full, []byte(text), 0o644); err != nil {
+		if err := root.WriteFile(full, []byte(text), 0o644); err != nil {
 			return model.Err("WRITE_FAILED", "无法保存文件，请检查权限")
 		}
 		changes = append(changes, file+"："+detectLineEnding(string(data))+" → "+detectLineEnding(text)+"（按 Git 规则修复）")

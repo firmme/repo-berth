@@ -42,6 +42,8 @@ jobs:
         run: |
           node scripts/package-windows.mjs --skip-build
           node scripts/verify-package.mjs --no-native
+          node scripts/package-update.mjs
+          node scripts/verify-package.mjs --update
       - uses: actions/upload-artifact@v4
         if: runner.os == 'Windows'
         with:

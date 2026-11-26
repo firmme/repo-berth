@@ -7,7 +7,6 @@ import (
 	"io"
 	"mime"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strings"
 	"unicode/utf16"
@@ -187,11 +186,12 @@ func (s *Service) InspectWorkingFile(id, file string) (WorkingFileInfo, error) {
 	if err != nil {
 		return WorkingFileInfo{}, err
 	}
-	full, err := workingFilePath(c.Path, file)
+	root, name, err := openWorkingFilePath(c.Path, file)
 	if err != nil {
 		return WorkingFileInfo{}, err
 	}
-	info, err := os.Lstat(full)
+	defer root.Close()
+	info, err := root.Lstat(name)
 	if err != nil {
 		return WorkingFileInfo{}, model.Err("FILE_MISSING", "文件不存在，可能已被删除")
 	}
@@ -206,7 +206,7 @@ func (s *Service) InspectWorkingFile(id, file string) (WorkingFileInfo, error) {
 			PreviewKind: "directory",
 		}, nil
 	}
-	if info.Mode()&os.ModeSymlink != 0 {
+	if !info.Mode().IsRegular() {
 		return WorkingFileInfo{}, model.Err("NOT_FILE", "请选择普通文件")
 	}
 	sampleSize := info.Size()
@@ -214,7 +214,7 @@ func (s *Service) InspectWorkingFile(id, file string) (WorkingFileInfo, error) {
 		sampleSize = 256 << 10
 	}
 	sample := make([]byte, sampleSize)
-	handle, err := os.Open(full)
+	handle, err := root.Open(name)
 	if err != nil {
 		return WorkingFileInfo{}, model.Err("READ_FAILED", "无法读取文件，请检查权限")
 	}
@@ -243,19 +243,20 @@ func (s *Service) ReadWorkingFilePreview(id, file string) (WorkingFilePreview, e
 	if err != nil {
 		return WorkingFilePreview{}, err
 	}
-	full, err := workingFilePath(c.Path, file)
+	root, name, err := openWorkingFilePath(c.Path, file)
 	if err != nil {
 		return WorkingFilePreview{}, err
 	}
-	data, err := os.ReadFile(full)
+	defer root.Close()
+	data, err := readWorkingBytes(root, name, maxPreviewFile)
 	if err != nil {
-		return WorkingFilePreview{}, model.Err("READ_FAILED", "无法读取文件，请检查权限")
+		return WorkingFilePreview{}, err
 	}
 	return WorkingFilePreview{
 		Kind:     info.PreviewKind,
 		MIMEType: info.MIMEType,
 		Data:     base64.StdEncoding.EncodeToString(data),
-		Size:     info.Size,
+		Size:     int64(len(data)),
 	}, nil
 }
 
@@ -274,10 +275,6 @@ func (s *Service) SetWorkingFileFormat(id, file, encoding, lineEnding string) er
 	if err != nil {
 		return err
 	}
-	full, err := workingFilePath(c.Path, file)
-	if err != nil {
-		return err
-	}
 	lock := s.workLock(c.Path)
 	if err := lock.Lock(s.ctx); err != nil {
 		return err
@@ -286,14 +283,14 @@ func (s *Service) SetWorkingFileFormat(id, file, encoding, lineEnding string) er
 	if err := s.validateCheckout(c); err != nil {
 		return err
 	}
-	if info, err := os.Lstat(full); err != nil {
-		return model.Err("FILE_MISSING", "文件不存在，可能已被删除")
-	} else if info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-		return model.Err("NOT_FILE", "请选择普通文本文件")
-	}
-	raw, err := os.ReadFile(full)
+	root, name, err := openWorkingFilePath(c.Path, file)
 	if err != nil {
-		return model.Err("READ_FAILED", "无法读取文件，请检查权限")
+		return err
+	}
+	defer root.Close()
+	raw, err := readWorkingBytes(root, name, maxEditableFile)
+	if err != nil {
+		return err
 	}
 	text, _, binaryFile := decodeText(raw)
 	if binaryFile {
@@ -306,7 +303,7 @@ func (s *Service) SetWorkingFileFormat(id, file, encoding, lineEnding string) er
 	if bytes.Equal(raw, payload) {
 		return nil
 	}
-	if err := os.WriteFile(full, payload, 0o644); err != nil {
+	if err := root.WriteFile(name, payload, 0o644); err != nil {
 		return model.Err("WRITE_FAILED", "无法保存文件，请检查权限")
 	}
 	if previous := detectLineEnding(text); previous != lineEnding && previous != "None" {

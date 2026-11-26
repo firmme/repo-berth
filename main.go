@@ -179,6 +179,10 @@ func startExternal(cmd *exec.Cmd) error {
 	return nil
 }
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == "--version" {
+		fmt.Println(appVersion)
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "--credential-helper" {
 		os.Exit(gitexec.HelperMain(os.Args[2:]))
 	}
